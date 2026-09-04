@@ -67,7 +67,7 @@ jobs:
           git checkout main 2>/dev/null || git checkout -b main
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add output/ || true
+          git add -f output/ || true
           if git diff --cached --quiet; then
             echo "no new images"
           else

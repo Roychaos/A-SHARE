@@ -11,8 +11,8 @@ pylibs/
 # 本地配置（含可能写入的地址信息）
 config.yaml
 
-# 数据与输出
-data/
+# 数据与输出（注意：/data 只忽略根目录，避免误伤 src/data 包）
+/data/
 output/
 *.db
 *.log
