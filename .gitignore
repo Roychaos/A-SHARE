@@ -1,0 +1,22 @@
+# 运行时产物与密钥，不入库
+__pycache__/
+*.pyc
+.venv/
+venv/
+.tmp/
+pylibs/
+.idea/
+.vscode/
+
+# 本地配置（含可能写入的地址信息）
+config.yaml
+
+# 数据与输出
+data/
+output/
+*.db
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db

@@ -1,0 +1,12 @@
+# A股量价选股 MVP 脚手架（路线A）
+# 架构细节见仓库外主文档：《路线A_MVP技术架构与执行方案.md》
+
+akshare>=1.14.0
+pandas>=2.0.0
+numpy>=1.26.0
+matplotlib>=3.8.0
+mplfinance>=0.12.10b0
+Pillow>=10.0.0
+requests>=2.31.0
+PyYAML>=6.0
+openai>=1.30.0

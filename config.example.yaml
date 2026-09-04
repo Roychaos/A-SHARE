@@ -1,0 +1,103 @@
+# ============================================================
+# A股量价选股 MVP 配置模板（复制为 config.yaml 后按需修改）
+# 密钥一律走环境变量；改前先读主设计文档 §6/§7
+# ============================================================
+
+universe:
+  boards: ["SH主板", "SZ主板", "创业板", "科创板"]   # 范围; 北交所/B股默认排除
+  min_list_days: 120          # 剔除次新股
+  exclude_st: true            # 剔除 ST/*ST
+  exclude_price_below: 2.0    # 剔除低价股
+  exclude_limit: true         # 剔除当日涨停(无买点)
+
+# ---- 形态学习（赢家模板库） ----
+learning:
+  lookback_days: 250
+  forward_days: 10
+  min_fwd_return: 0.09        # 未来10日收益 >= 9% 才算赢家
+  anchor:
+    day_gain_min: 0.02
+    prior10_gain_max: 0.03
+    prior60_range: [-0.05, 0.25]
+  window: 25
+  max_templates_per_day: 20
+  sim_weights: {price: 0.7, volume: 0.3}
+  top_matches: 3
+
+# ---- 旧版5信号（已被 factors 体系取代，保留作回退/对照，默认关闭） ----
+signals:
+  warm_volume_rise:    {enable: false, vol_ratio: [1.2, 4.0], pct_range: [0.0, 0.06]}
+  platform_breakout:   {enable: false, lookback: 60, vol_ratio_min: 1.5}
+  ma_bullish_init:     {enable: false, cross_within_days: 3}
+  pullback_hold:       {enable: false, ma: 20}
+  obv_high:            {enable: false, lookback: 60}
+
+# ---- 打分与选股（回测结论：纯形态有效，追涨/趋势为反指，权重置0） ----
+scoring:
+  weights: {pattern_sim: 1.0, signal: 0.0, trend: 0.0}
+  min_score: 60.0             # 形态相似度 >= 60 才入选
+  top_n: 5
+  max_per_industry: 2
+
+# ---- 高级7因子信号体系（用户规格表；不可得项 enable:false 并权重自动归一化） ----
+factors:
+  enabled: true
+  filters:
+    shadow_reject: true         # F4避雷针: 上影线>=振幅25% 剔除
+    volume_blowout: true        # F5绝对禁止爆量
+    volume_blowout_ratio: 1.5   #   爆量阈值(>150%)
+    heat_sector_reject: true    # F7暴热板块(近5日涨幅前3)剔除
+  f1_efficiency: {enable: true, weight: 25, gate: 1.2}
+  f2_lvf: {enable: false, weight: 15}
+  f3_ofi: {enable: false, weight: 15}
+  f4_move: {enable: true, weight: 15, day_band: [0.03, 0.045], cum5_band: [0.06, 0.09]}
+  f5_volume: {enable: true, weight: 10, band: [1.15, 1.35]}
+  f6_fundflow: {enable: false, weight: 10}
+  f7_sector: {enable: true, weight: 10, corr_band: [0.45, 0.58], excess_min: 0.025}
+
+# ---- 报告（LLM 文案 + 图表，Phase 3） ----
+report:
+  llm:
+    enable: true
+    base_url: "https://api.deepseek.com"
+    model: "deepseek-chat"
+    temperature: 0.3
+    max_tokens: 800
+  charts:
+    kline_bars: 120
+    ma_windows: [5, 10, 20, 60]
+  fonts:
+    windows: ["C:/Windows/Fonts/msyh.ttc"]
+    linux: ["/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"]
+
+# ---- 推送（推自己: Server酱；群推: 企业微信群机器人） ----
+push:
+  channels: ["serverchan"]     # serverchan=推自己微信; wecom=企业微信群机器人; console=调试
+  image_count: 3               # 发图只数（serverchan 需配 sm.ms 图床 token 才带图）
+  disclaimer: "仅供研究参考，不构成任何投资建议。"
+  image_host:                  # 图床（serverchan 内嵌图片用，可选）
+    provider: smms             # sm.ms 已迁移至 S.EE，代码自动兼容两个端点
+    endpoints: ["https://sm.ms/api/v2/upload", "https://s.ee/api/v2/upload"]
+
+# ---- GitHub 图床 / 部署（jsDelivr 直链，仓库需 public） ----
+github:
+  repo: ""            # 形如 "你的用户名/仓库名"；CI 自动读 GITHUB_REPOSITORY，本地需填
+  branch: "main"
+
+# ---- 行情抓取 ----
+fetch:
+  years_back: 1              # 只保留近1年（更早数据无行情时效性）
+  adjust: "qfq"
+  sleep_s: 0.5
+  retry_times: 5
+  base_delay: 2.0
+  sources: [eastmoney, sina] # 东财主源，新浪自动降级；被限流时可只留 [sina]
+  early_stop_after: 30
+  direct: true
+
+# ---- 存储路径 ----
+paths:
+  db: "data/screener.db"
+  output: "output"
+  log: "output/run.log"
