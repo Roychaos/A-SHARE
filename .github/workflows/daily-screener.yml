@@ -64,6 +64,7 @@ jobs:
 
       - name: Commit chart images (jsDelivr 图床)
         run: |
+          git checkout main 2>/dev/null || git checkout -b main
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add output/ || true
@@ -71,7 +72,7 @@ jobs:
             echo "no new images"
           else
             git commit -m "charts $(date -u +%F)"
-            git push
+            git push origin main
           fi
 
       - name: Push report to WeChat (Server酱 + jsDelivr 图床)
