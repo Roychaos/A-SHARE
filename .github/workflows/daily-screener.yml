@@ -100,7 +100,7 @@ jobs:
         env:
           TZ: Asia/Shanghai
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
-        run: python scripts/emit_report.py --date today --push-only
+        run: python scripts/emit_report.py --push-only   # 自动取最新一次选股结果日期
 
       - name: Upload output for debug
         if: always()
