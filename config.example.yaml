@@ -89,11 +89,11 @@ github:
 fetch:
   years_back: 1              # 只保留近1年（更早数据无行情时效性）
   adjust: "qfq"
-  sleep_s: 0.5
-  retry_times: 5
-  base_delay: 2.0
-  sources: [eastmoney, sina] # 东财主源，新浪自动降级；被限流时可只留 [sina]
-  early_stop_after: 30
+  sleep_s: 0.4               # 每股请求间隔(秒)，±50%抖动防限流
+  retry_times: 5             # 每个(源,复权)组合的重试次数
+  base_delay: 2.0            # 重试首次等待秒数（指数退避 x2）
+  sources: [sina]            # ★统一用新浪源：稳定、无东财重试浪费（GitHub服务器访问东财常半通）
+  early_stop_after: 30       # 连续失败达此数即熔断退出（等待后重跑续传）
   direct: true
 
 # ---- 存储路径 ----
