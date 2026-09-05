@@ -30,17 +30,23 @@ jobs:
           name: screener-db
           path: .            # 还原出 data/screener.db
 
-      - name: Seed database from GitHub Release (首次/无artifact时)
+      - name: Seed database (首次/无artifact时：从仓库 seed.zip 或 Release 解压)
         run: |
           if [ ! -f data/screener.db ]; then
-            echo "未找到历史库，从 Release(seed) 下载种子库(seed.zip)..."
+            echo "未找到历史库，尝试种子库..."
             mkdir -p data
-            curl -fL --retry 3 -o data/seed.zip \
-              "https://github.com/Roychaos/A-SHARE/releases/download/seed/seed.zip" \
-              || { echo "未找到种子库(请先在 Release 上传 seed.zip)"; exit 0; }
-            python -c "import zipfile; zipfile.ZipFile('data/seed.zip').extractall('data')"
-            rm -f data/seed.zip
-            echo "种子库已解压"
+            if [ -f seed.zip ]; then
+              python -c "import zipfile; zipfile.ZipFile('seed.zip').extractall('data')"
+              rm -f seed.zip
+              echo "已从仓库 seed.zip 解压出种子库"
+            else
+              curl -fL --retry 3 -o data/seed.zip \
+                "https://github.com/Roychaos/A-SHARE/releases/download/seed/seed.zip" \
+                && python -c "import zipfile; zipfile.ZipFile('data/seed.zip').extractall('data')" \
+                && rm -f data/seed.zip \
+                && echo "已从 Release 下载种子库" \
+                || echo "无可用种子库（将全量回填）"
+            fi
           else
             echo "数据库已就绪"
           fi
