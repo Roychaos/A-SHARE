@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import sys
 import os
 
@@ -29,6 +30,9 @@ def main() -> int:
     ap.add_argument("--image-count", type=int, default=None, help="发图只数")
     ap.add_argument("--config", default=None, help="配置文件路径")
     args = ap.parse_args()
+
+    if args.date == "today":
+        args.date = dt.date.today().isoformat()   # CI 里 --date today → 真实日期
 
     cfg = load_config(args.config)
     db = cfg_get(cfg, "paths.db", "data/screener.db")
