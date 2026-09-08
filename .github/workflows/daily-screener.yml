@@ -72,13 +72,11 @@ jobs:
         run: python scripts/run_daily.py --date today --no-push
 
       - name: Checkpoint SQLite (merge WAL into main db)
-        if: always()
         run: |
           python -c "import sqlite3,os; p='data/screener.db';
           os.path.exists(p) and sqlite3.connect(p).execute('PRAGMA wal_checkpoint(TRUNCATE)')"
 
       - name: Persist database for next run
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screener-db
@@ -98,11 +96,17 @@ jobs:
             git push origin main
           fi
 
-      - name: Push report to WeChat (Server酱 + jsDelivr 图床)
+      - name: Push report to WeChat (if today has result)
         env:
           TZ: Asia/Shanghai
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
-        run: python scripts/emit_report.py --push-only   # 自动取最新一次选股结果日期
+        run: |
+          today=$(date +%F)
+          if [ -f "output/$today/summary.md" ]; then
+            python scripts/emit_report.py --date "$today" --push-only
+          else
+            echo "$today 无选股结果（非交易日或选股为空），跳过推送"
+          fi
 
       - name: Upload output for debug
         if: always()
