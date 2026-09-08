@@ -133,6 +133,58 @@ def fetch_history_safe(code: str, start_date: str, end_date: str,
     raise last_err  # type: ignore[misc]
 
 
+# ---------------- 整市场快照（每日增量快路径） ----------------
+
+def _spot_col(df, *names):
+    for n in names:
+        if n in df.columns:
+            return n
+    return None
+
+
+def fetch_bulk_snapshot(conn, date: str) -> int:
+    """新浪全市场快照 1 次请求 → 把 date 当日 OHLCV 全部入库。
+
+    返回写入的股票数；接口/列名不匹配等失败返回 0（调用方回退逐股拉取）。
+    """
+    try:
+        import akshare as ak
+    except ImportError:  # pragma: no cover
+        return 0
+    df = ak.stock_zh_a_spot()
+    if df is None or df.empty:
+        return 0
+    c_code = _spot_col(df, "代码")
+    c_open, c_high, c_low, c_close = _spot_col(df, "今开", "开盘"), \
+        _spot_col(df, "最高"), _spot_col(df, "最低"), _spot_col(df, "最新价", "收盘")
+    c_vol = _spot_col(df, "成交量", "成交数量")
+    c_amt = _spot_col(df, "成交额")
+    c_chg = _spot_col(df, "涨跌幅")
+    if not all([c_code, c_open, c_high, c_low, c_close, c_vol]):
+        logger.warning("快照列名不匹配(代码=%s 开=%s 高=%s 低=%s 收=%s 量=%s)，放弃快照",
+                       c_code, c_open, c_high, c_low, c_close, c_vol)
+        return 0
+
+    filled = 0
+    for _, r in df.iterrows():
+        try:
+            code = str(r[c_code]).zfill(6)
+            close = _to_float(r[c_close])
+            if len(code) != 6 or not code.isdigit() or not close or close <= 0:
+                continue
+            row = {"date": date, "open": _to_float(r[c_open]), "high": _to_float(r[c_high]),
+                   "low": _to_float(r[c_low]), "close": close,
+                   "volume": _to_float(r[c_vol]), "amount": _to_float(r[c_amt]) if c_amt else None,
+                   "pct_chg": _to_float(r[c_chg]) if c_chg else None}
+            if row["open"] is None or row["high"] is None or row["low"] is None:
+                continue
+            S.upsert_daily_bars(conn, code, [row])
+            filled += 1
+        except Exception:  # noqa: BLE001 单行失败忽略
+            continue
+    return filled
+
+
 # ---------------- 股票池 ----------------
 
 def ensure_universe(conn, boards: list[str] | None = None, quiet: bool = False) -> list[dict]:
@@ -184,6 +236,17 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
 
     start_default = fallback_start or (dt.date.today() - dt.timedelta(days=370)).isoformat()
     end = date or dt.date.today().isoformat()
+
+    # ★快路径：整市场快照一次入库（把每日 5000 次请求 → 1 次），失败自动回退逐股
+    bulk_filled = False
+    if not limit and codes and bool(fetch_cfg.get("bulk_snapshot", True)) and end == dt.date.today().isoformat():
+        try:
+            filled = fetch_bulk_snapshot(conn, end)
+            if filled:
+                bulk_filled = True
+                logger.info("整市场快照入库 %d 只/%d 根（跳过逐股拉取）", filled, filled)
+        except Exception as exc:  # noqa: BLE001 快照失败不影响主流程
+            logger.warning("整市场快照失败，回退逐股: %s", exc)
 
     stats = {"codes": 0, "bars": 0, "failed": [], "stopped_early": False}
     consecutive_fail = 0

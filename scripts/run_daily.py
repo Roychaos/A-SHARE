@@ -122,7 +122,11 @@ def main() -> int:
         status = "no_pick"
     S.add_run_log(conn, day, status, summary)
     conn.close()
-    return 1 if stats["failed"] else 0
+    # 只有"大面积失败/熔断"才返回非0（触发 CI 告警）；零星失败不阻断持久化与推送
+    n_fail = len(stats["failed"])
+    if stats.get("stopped_early") or n_fail >= 100:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

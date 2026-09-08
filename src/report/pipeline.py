@@ -71,8 +71,8 @@ def emit(conn, cfg: dict, date: str, *, push: bool = True, image_count: int | No
             charts_mod.make_kline(conn, cfg, s["code"], date, chart_path)
             card_mod.compose_card(cfg, s, chart_path, card_path)
             cards.append(card_path)
-        except Exception as exc:  # noqa: BLE001 图形失败不阻断推送其余
-            logger.warning("%s 图文生成失败: %s", s["code"], exc)
+        except Exception:  # noqa: BLE001 图形失败不阻断推送其余；记完整堆栈便于排查
+            logger.exception("%s 图文生成失败", s["code"])
 
     md = build_markdown(date, selected)
     md_path = os.path.join(out_dir, "summary.md")

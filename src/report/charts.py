@@ -33,6 +33,11 @@ def make_kline(conn, cfg: dict, code: str, date: str, out_path: str) -> str | No
     df = df.set_index("Date")
     for col in ("Open", "High", "Low", "Close", "Volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
+    # 空值/NaN 会导致 mplfinance 内部 int 转换报 'float' object cannot be interpreted as an integer
+    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    if len(df) < 30:
+        logger.warning("%s: 清洗后K线不足30根，跳过图表", code)
+        return None
 
     d = os.path.dirname(out_path)
     if d:

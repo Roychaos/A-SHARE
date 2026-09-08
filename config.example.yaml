@@ -93,6 +93,7 @@ fetch:
   retry_times: 5             # 每个(源,复权)组合的重试次数
   base_delay: 2.0            # 重试首次等待秒数（指数退避 x2）
   sources: [sina]            # ★统一用新浪源：稳定、无东财重试浪费（GitHub服务器访问东财常半通）
+  bulk_snapshot: true        # ★每日增量优先用整市场快照(1次请求)；失败自动回退逐股
   early_stop_after: 30       # 连续失败达此数即熔断退出（等待后重跑续传）
   direct: true
 
