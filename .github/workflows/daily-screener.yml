@@ -6,11 +6,15 @@ name: daily-screener
 
 on:
   schedule:
-    - cron: '45 7 * * 1-5'
+    # GitHub 的 schedule 经常延迟甚至整点丢单，所以给三个时段，谁先跑成算谁的（有幂等守卫，不会重复推送）
+    - cron: '45 7 * * 1-5'      # 北京 15:45（主）
+    - cron: '40 8 * * 1-5'      # 北京 16:40（兜底1）
+    - cron: '50 9 * * 1-5'      # 北京 17:50（兜底2）
   workflow_dispatch: {}
 
 permissions:
   contents: write          # 允许回写 output 图片到仓库（jsDelivr 图床）
+  actions: read            # 允许用 gh api 读取上一次运行上传的数据库产物
 
 concurrency:
   group: daily-screener
@@ -23,33 +27,69 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore database from previous run
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: screener-db
-          path: .            # 还原出 data/screener.db
-
-      - name: Seed database (首次/无artifact时：从仓库 seed.zip 或 Release 解压)
+      - name: 幂等守卫（当天报告已存在则本次跳过）
+        id: gate
+        env:
+          TZ: Asia/Shanghai
         run: |
+          today=$(date +%F)
+          if [ -f "output/$today/summary.md" ]; then
+            echo "已存在 output/$today/summary.md —— 今天已经跑过并推过了，本次跳过"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "今天（$today）还没有报告，本次正常执行"
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ★ 以前这里用 actions/download-artifact@v4 + path: . —— v4 只能看到「本次运行」的产物，
+      #   所以这一步从上线起就一直是失败的：每次运行都退回 seed.zip，等于每天都从旧种子库重新抓
+      #   十几个交易日 → 单次跑 1~3 小时，还容易中途被限流。现改为用 gh api 明确指定上一次成功运行的产物。
+      - name: Restore database (上次成功运行的产物 → seed.zip 兜底)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          if [ -f data/screener.db ]; then
+            echo "数据库已就绪（workspace 中已存在）"
+            exit 0
+          fi
+
+          echo "== 1) 从上次成功运行下载 screener-db 产物 =="
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/daily-screener.yml/runs?status=success&per_page=10" --jq '.workflow_runs[].id' 2>/dev/null | head -1 || true)
+          echo "上次成功运行的 run_id = ${run_id:-无}"
+          if [ -n "$run_id" ]; then
+            art_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" --jq '.artifacts[] | select(.name=="screener-db") | .id' 2>/dev/null | head -1 || true)
+            echo "产物 artifact_id = ${art_id:-无}"
+            if [ -n "$art_id" ]; then
+              if curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+                   -o /tmp/db.zip \
+                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$art_id/zip"; then
+                rm -rf /tmp/dbx && mkdir -p /tmp/dbx
+                python -c "import zipfile; zipfile.ZipFile('/tmp/db.zip').extractall('/tmp/dbx')" || echo "解压失败"
+                found=$(find /tmp/dbx -name '*.db' 2>/dev/null | head -1 || true)
+                if [ -n "$found" ]; then
+                  cp "$found" data/screener.db
+                  echo "已从上次运行恢复数据库：$(du -h data/screener.db | cut -f1)"
+                fi
+              fi
+            fi
+          fi
+
+          echo "== 2) 兜底 seed.zip =="
           if [ ! -f data/screener.db ]; then
-            echo "未找到历史库，尝试种子库..."
-            mkdir -p data
             if [ -f seed.zip ]; then
               python -c "import zipfile; zipfile.ZipFile('seed.zip').extractall('data')"
-              rm -f seed.zip
-              echo "已从仓库 seed.zip 解压出种子库"
+              echo "已从仓库 seed.zip 解压出种子库（较旧，会触发较慢的增量回补）"
             else
-              curl -fL --retry 3 -o data/seed.zip \
-                "https://github.com/Roychaos/A-SHARE/releases/download/seed/seed.zip" \
-                && python -c "import zipfile; zipfile.ZipFile('data/seed.zip').extractall('data')" \
-                && rm -f data/seed.zip \
+              curl -fL --retry 3 -o /tmp/seed.zip \
+                "https://github.com/$GITHUB_REPOSITORY/releases/download/seed/seed.zip" \
+                && python -c "import zipfile; zipfile.ZipFile('/tmp/seed.zip').extractall('data')" \
                 && echo "已从 Release 下载种子库" \
                 || echo "无可用种子库（将全量回填）"
             fi
-          else
-            echo "数据库已就绪"
           fi
+          ls -lh data/ | head -5
 
       - uses: actions/setup-python@v5
         with:
@@ -66,6 +106,7 @@ jobs:
         run: cp config.example.yaml config.yaml
 
       - name: Run daily pipeline (fetch -> learn -> select -> cards, no push yet)
+        if: steps.gate.outputs.skip != '1'
         env:
           TZ: Asia/Shanghai
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -86,6 +127,7 @@ jobs:
           retention-days: 30
 
       - name: Commit chart images (jsDelivr 图床)
+        continue-on-error: true   # 图片推送失败不能拖累微信推送
         run: |
           git checkout main 2>/dev/null || git checkout -b main
           git config user.name "github-actions"
@@ -99,6 +141,7 @@ jobs:
           fi
 
       - name: Push report to WeChat (if today has result)
+        if: always() && steps.gate.outputs.skip != '1'
         env:
           TZ: Asia/Shanghai
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
