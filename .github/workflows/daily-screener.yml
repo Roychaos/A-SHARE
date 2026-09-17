@@ -13,13 +13,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'daily=日常选股（默认）；repair=先补历史空洞再选股（慢，30~180分钟）'
+        description: 'daily=日常选股（默认）；repair=先补历史空洞再选股（慢）；backtest=只跑样本外回测（出报告不推送）'
         required: false
         default: daily
         type: choice
         options:
           - daily
           - repair
+          - backtest
 
 permissions:
   contents: write          # 允许回写 output 图片到仓库（jsDelivr 图床）
@@ -36,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 幂等守卫（当天报告已存在则本次跳过；repair 模式强制重跑）
+      - name: 幂等守卫（当天报告已存在则本次跳过；repair/backtest 模式强制重跑）
         id: gate
         env:
           TZ: Asia/Shanghai
@@ -44,8 +45,8 @@ jobs:
         run: |
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           today=$(date +%F)
-          if [ "$MODE" = "repair" ]; then
-            echo "repair 模式：忽略幂等守卫，先补历史空洞再重跑今天的选股"
+          if [ "$MODE" != "daily" ]; then
+            echo "$MODE 模式：忽略幂等守卫"
             echo "skip=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -126,8 +127,20 @@ jobs:
           TZ: Asia/Shanghai
         run: python scripts/fill_gap.py --days 45
 
+      # 只在手动选 backtest 模式时跑：样本外回放，结果写进 output/ 并随仓库提交
+      # （不选股、不推送，避免消耗 Server酱 免费额度）
+      - name: 样本外回测（仅 backtest 模式，20~60 分钟）
+        if: steps.gate.outputs.mode == 'backtest'
+        continue-on-error: true
+        env:
+          TZ: Asia/Shanghai
+          BACKTEST_DAYS: '25'      # 回放最近 N 个交易日（每个交易日要全市场算一遍相似度，约 1~2 分钟/日）
+        run: |
+          mkdir -p output
+          python scripts/validate.py --days "$BACKTEST_DAYS" 2>&1 | tee "output/backtest_$(date +%F).txt"
+
       - name: Run daily pipeline (fetch -> learn -> select -> cards, no push yet)
-        if: steps.gate.outputs.skip != '1'
+        if: steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
         env:
           TZ: Asia/Shanghai
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -165,7 +178,7 @@ jobs:
       #   所以这里用「报告内容 md5」做闸门：内容没变就不再推第二次。
       #   修复/重跑不会白白烧额度；内容真的更新了（比如补好了历史数据）才再推一条。
       - name: Push report to WeChat (同一份内容只推一次，保护免费额度)
-        if: always() && steps.gate.outputs.skip != '1'
+        if: always() && steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
         env:
           TZ: Asia/Shanghai
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
@@ -185,7 +198,7 @@ jobs:
           python scripts/emit_report.py --date "$today" --push-only && echo "$sig" > "$marker"
 
       - name: 提交已推送标记（供后续运行判断）
-        if: always() && steps.gate.outputs.skip != '1'
+        if: always() && steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
         continue-on-error: true
         run: |
           today=$(date +%F)

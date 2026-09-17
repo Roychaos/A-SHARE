@@ -200,17 +200,75 @@ def _sector_data(code: str, ind: str, ind_data: dict, min_days: int = 15) -> dic
 
 # ---------------- 选股 ----------------
 
+def _day_gate_ok(conn, cfg: dict, date: str, scored: list[dict]) -> tuple[bool, str]:
+    """日级闸门：当日最高分需 >= 历史「当日最高分」序列的指定分位。
+
+    参照序列取自 scan_result（每天入选票的最高分 ≈ 当日最高分），
+    所以必须先积累若干交易日的历史；样本不足时不做限制（放行）。
+
+    配置（scoring.day_gate）：
+        enable      是否启用（默认 false）
+        lookback    参照序列长度（交易日，默认 60）
+        min_samples 至少要有多少天历史才开始限制（默认 10）
+        min_quantile 当日最高分需 >= 参照序列的该分位（默认 0.5 = 中位水平）
+    """
+    gate = (cfg.get("scoring", {}) or {}).get("day_gate") or {}
+    if not gate.get("enable"):
+        return True, "未启用"
+    if not scored:
+        return False, "无可评分标的"
+    best = max(float(s["score"]) for s in scored if s.get("score") is not None)
+    lookback = int(gate.get("lookback", 60))
+    min_samples = int(gate.get("min_samples", 10))
+    q = float(gate.get("min_quantile", 0.5))
+    rows = conn.execute(
+        "SELECT MAX(score) FROM scan_result WHERE date < ? GROUP BY date "
+        "ORDER BY date DESC LIMIT ?", (date, lookback)).fetchall()
+    hist = sorted(float(r[0]) for r in rows if r[0] is not None)
+    if len(hist) < min_samples:
+        return True, f"历史样本不足({len(hist)}/{min_samples} 天)，暂不限流"
+    pos = min(len(hist) - 1, max(0, int(round(q * (len(hist) - 1)))))
+    thr = hist[pos]
+    if best < thr:
+        return False, f"当日最高分 {best:.2f} < 历史{q:.0%}分位 {thr:.2f}"
+    return True, f"当日最高分 {best:.2f} >= 参照 {thr:.2f}"
+
+
 def select_top(scored: list[dict], cfg: dict) -> list[dict]:
+    """按分数选出 Top N，支持两种门槛（可同时生效）：
+
+    min_percentile  当日截面的**前 p**（如 0.02 = 只保留形态分最高的 2%）。
+                    ★ 推荐用这个：绝对分门槛在本项目里是失效的 ——
+                    price_sim=(corr+1)/2*100 把全市场压缩在 67~95 分区间
+                    （实测 2026-09-08：最高 95.23 / 中位数 87.74 / 最低 66.86），
+                    原来的 min_score=60 实测 5202/5202 只全部通过，等于没有门槛。
+    min_score       绝对分下限（可选）。若要启用，请按实测分布取值
+                    （99.9%→94.55、99%→93.58、95%→92.64），设成 60 毫无作用。
+    """
     scoring = cfg.get("scoring", {})
-    min_score = float(scoring.get("min_score", 60.0))
     top_n = int(scoring.get("top_n", 5))
     max_ind = int(scoring.get("max_per_industry", 2))
 
     def _val(s):
         return s.get("score") if "score" in s else s.get("total")
 
-    cand = [s for s in scored if _val(s) is not None and _val(s) >= min_score]
+    cand = [s for s in scored if _val(s) is not None]
     cand.sort(key=lambda s: (-_val(s), -(s.get("sig_score") or 0)))
+
+    pct = scoring.get("min_percentile")
+    if pct:
+        try:
+            p = float(pct)
+        except (TypeError, ValueError):
+            p = 0.0
+        if 0 < p < 1 and cand:
+            keep = max(top_n, int(round(p * len(cand))))
+            cand = cand[:keep]
+    else:
+        ms = scoring.get("min_score")
+        if ms is not None:
+            cand = [s for s in cand if _val(s) >= float(ms)]
+
     ind_count: dict[str, int] = defaultdict(int)
     out = []
     for s in cand:
@@ -329,6 +387,17 @@ def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
             "hits": combined["hits"], "matched_tpl_id": combined["best_tpl_id"],
             "best_tpl_code": combined["best_code"], "best_tpl_anchor": combined["best_anchor"],
         })
+
+    # ★ 日级闸门（可选）：只有当"今天的最高分"达到历史参照水平时才出手。
+    #   为什么需要它：任何"股票级"门槛（分位数/绝对分）在"总是取 Top N"的结构下
+    #   **都不改变结果** —— 从"前 2%"里取前 5 只，和从全市场取前 5 只完全一样
+    #   （tests/test_score_gate.py 里有断言）。唯一真正有过滤效果的，是"今天要不要选"。
+    ok, why = _day_gate_ok(conn, cfg, date, scored_all)
+    if not ok:
+        logger.info("%s: 日级闸门未通过（%s），今日不选股（宁缺毋滥）", date, why)
+        return []
+    if scored_all:
+        logger.info("%s: 日级闸门 %s", date, why)
 
     selected = select_top(scored_all, cfg)
     for i, s in enumerate(selected, 1):

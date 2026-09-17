@@ -67,9 +67,13 @@ def main() -> int:
               f"GITHUB_REPOSITORY={os.environ.get('GITHUB_REPOSITORY', '-')}")
         res = notifier.notify(cfg, cards, md, date, image_urls=urls)
         print(f"[push-only] 发送结果: {res}")
-        if not any(bool(v) for v in res.values()):
+        ok = any(bool(v) for v in res.values())
+        if not ok:
             print("[push-only] ⚠ 所有通道都失败，请看上方 WARNING 行定位原因")
-        return 0
+        # ★ 只有真的推成功了才返回 0：工作流靠这个退出码决定要不要写「已推送」标记。
+        #   否则推送失败（比如 Server酱 额度用尽）也会被标记成"推过了"，
+        #   之后同一天再跑就不会重试，报告永远送不出去。
+        return 0 if ok else 1
 
     conn = S.open_db(db)
     if args.date:
