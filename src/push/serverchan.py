@@ -21,10 +21,24 @@ def send(title: str, desp: str, images: list[str] | None = None) -> bool:
     content = desp
     for url in images or []:
         content += f"\n\n![图]({url})"
+    logger.warning("Server酱发送中: key=%s..., 标题=%s, 正文字数=%d, 图片=%d张",
+                   key[:8], title, len(content), len(images or []))
     try:
         r = requests.post(f"https://sctapi.ftqq.com/{key}.send",
                           data={"title": title, "desp": content}, timeout=30)
-        return r.status_code == 200
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Server酱发送异常: %s", exc)
+        logger.warning("Server酱发送异常: %s: %s", type(exc).__name__, exc)
         return False
+    if r.status_code != 200:
+        logger.warning("Server酱返回 HTTP %s: %s", r.status_code, r.text[:300])
+        return False
+    body = r.text[:300]
+    logger.warning("Server酱返回内容: %s", body)
+    try:
+        code = r.json().get("code")
+        if code not in (0, None):
+            logger.warning("Server酱业务错误 code=%s，请检查 SendKey/额度", code)
+            return False
+    except Exception:  # noqa: BLE001
+        pass
+    return True

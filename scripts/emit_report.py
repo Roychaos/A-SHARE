@@ -61,8 +61,14 @@ def main() -> int:
         cards = sorted(p for p in glob(os.path.join(d, "*.png")) if not p.endswith("_kline.png"))
         md = open(md_path, encoding="utf-8").read()
         urls = imagehost.jsdelivr_urls(cards, cfg)
-        notifier.notify(cfg, cards, md, date, image_urls=urls)
-        print(f"\npush-only 完成：图文 {len(cards)} 张，直链 {len(urls)} 条")
+        print(f"[push-only] 日期={date} 摘要={md_path} 卡片={len(cards)}张 直链={len(urls)}条")
+        print(f"[push-only] 通道={cfg.get('push', {}).get('channels')} "
+              f"SERVERCHAN_SENDKEY={'已设置' if os.environ.get('SERVERCHAN_SENDKEY') else '缺失!'} "
+              f"GITHUB_REPOSITORY={os.environ.get('GITHUB_REPOSITORY', '-')}")
+        res = notifier.notify(cfg, cards, md, date, image_urls=urls)
+        print(f"[push-only] 发送结果: {res}")
+        if not any(bool(v) for v in res.values()):
+            print("[push-only] ⚠ 所有通道都失败，请看上方 WARNING 行定位原因")
         return 0
 
     conn = S.open_db(db)
