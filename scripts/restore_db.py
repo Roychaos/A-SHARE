@@ -37,11 +37,20 @@ TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
 REPO = os.environ.get("GITHUB_REPOSITORY") or ""
 DB_PATH = os.environ.get("DB_PATH", "data/screener.db")
 NAME = os.environ.get("DB_ARTIFACT_NAME", "screener-db")
-LOOKBACK = int(os.environ.get("DB_LOOKBACK_DAYS", "8"))
+LOOKBACK = int(os.environ.get("DB_LOOKBACK_DAYS", "12"))
 MIN_BARS_PER_DAY = 100      # 绝对下限
 MISSING_RATIO = 0.80        # 当日入库 < 参照值 × 0.80 即算该日缺失（正常交易日入库率约 99.7%）
-GOOD_ENOUGH_MISSING = 0     # 缺失天数 <= 此值且日期够新即立刻采用
-GOOD_ENOUGH_LAG_DAYS = 5    # "日期够新" = 最新日期距今不超过这么多天
+GOOD_ENOUGH_MISSING = 0     # 缺失天数 <= 此值 才可能提前停止扫描
+BREAK_LAG_DAYS = 1          # 提前停止还需满足：库内最新日期距今不超过这么多天
+                            # （留 1 天余量：昨天的库 + 今天整市场快照 = 完整）
+
+
+def _freshness(maxd: str | None) -> int:
+    """把库内最新日期转成可比较的值，越大越新；无效日期最差。"""
+    try:
+        return dt.date.fromisoformat(maxd or "").toordinal()
+    except (TypeError, ValueError):
+        return 0
 
 
 def log(msg: str) -> None:
@@ -181,23 +190,29 @@ def main() -> int:
             log(f"  id={art['id']}  创建 {art.get('created_at')}  "
                 f"最新日期 {maxd}  {bars} 根  -> {tag}"
                 + (f"  缺失: {', '.join(miss_list[:8])}" if missing and missing != 9999 else ""))
-            if best is None or missing < best[0]:
-                best = (missing, art.get("created_at") or "", found, maxd, bars)
+            # ★ 排序键 = (缺失天数, -最新日期)：先比"缺得少"，再比"日期新"。
+            #   踩过的坑：以前写成 `missing < best[0]`（严格更优才替换），
+            #   结果同为"缺 0 天"时先出现的旧库（最新只到 09-03）会赖着不走，
+            #   把后面真正完整且最新的库（09-16）挡掉了。
+            key = (missing, -_freshness(maxd))
+            if best is None or key < best[0]:
+                best = (key, art.get("created_at") or "", found, maxd, bars)
             lag = (today - dt.date.fromisoformat(maxd)).days if maxd else 9999
-            if missing <= GOOD_ENOUGH_MISSING and lag <= GOOD_ENOUGH_LAG_DAYS:
-                log(f"  已满足条件（缺 {missing} 天、滞后 {lag} 天），停止继续下载")
+            if missing <= GOOD_ENOUGH_MISSING and lag <= BREAK_LAG_DAYS:
+                log(f"  已是最好的情况（缺 {missing} 天、滞后 {lag} 天），停止继续下载")
                 break
     finally:
         pass
 
-    if not best or best[0] == 9999:
+    if not best or best[0][0] == 9999:
         log("所有候选都不可用")
         shutil.rmtree(tmpdir, ignore_errors=True)
         return 1
 
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     shutil.copyfile(best[2], DB_PATH)
-    log(f"选中 id 对应产物（缺失 {best[0]} 天，最新 {best[3]}，{best[4]} 根）→ 已写入 {DB_PATH} "
+    log(f"★ 选中：缺失 {best[0][0]} 天 / 库内最新 {best[3]} / {best[4]} 根 "
+        f"（产物 id 见上表，创建于 {best[1]}）→ 已写入 {DB_PATH} "
         f"({os.path.getsize(DB_PATH) / 1048576:.1f} MB)")
     shutil.rmtree(tmpdir, ignore_errors=True)
     return 0
