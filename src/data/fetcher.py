@@ -105,17 +105,26 @@ _SOURCES: dict[str, Callable] = {
 
 def fetch_history_safe(code: str, start_date: str, end_date: str,
                        times: int = 5, base_delay: float = 2.0,
-                       sources: Iterable[str] = ("eastmoney", "sina")) -> list[dict]:
-    """按源顺序+复权顺序带重试抓取；全部失败抛最后一次异常。"""
+                       sources: Iterable[str] = ("eastmoney", "sina"),
+                       adjust_fallback: bool = True) -> list[dict]:
+    """按源顺序+复权顺序带重试抓取；全部失败抛最后一次异常。
+
+    adjust_fallback=True 时，每个源会尝试 (qfq, 不复权) 两个组合；
+    这也意味着「单只股票彻底失败」的代价 = len(sources) * times * 2 次请求
+    + 双份指数退避睡眠（times=5/base=2 时纯等待就有 60 秒）。
+    只用一个源（如仅新浪）时建议置 false：连接被重置时再试"不复权"毫无意义，
+    只会让失败成本翻倍、把整体运行从 1 小时拖成十几小时。
+    """
     last_err: Exception | None = None
     em_tried = False  # 本只股票是否曾尝试过东财源（用于区分"主源即新浪"与"降级到新浪"）
+    adjs = ("qfq", "") if adjust_fallback else ("qfq",)
     for src in sources:
         fn = _SOURCES.get(src)
         if fn is None:
             continue
         if src == "eastmoney":
             em_tried = True
-        for adj in ("qfq", ""):
+        for adj in adjs:
             try:
                 rows = retry_call(fn, code, start_date, end_date, adjust=adj,
                                   times=times, base_delay=base_delay, backoff=2.0)
@@ -245,6 +254,7 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
     base_delay = float(fetch_cfg.get("base_delay", 2.0))
     sources = tuple(fetch_cfg.get("sources", ["eastmoney", "sina"]))
     early_stop = int(fetch_cfg.get("early_stop_after", 30))
+    adjust_fallback = bool(fetch_cfg.get("adjust_fallback", True))
 
     if codes is None:
         meta = S.list_stock_meta(conn)
@@ -287,7 +297,8 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
                 continue  # 已覆盖，跳过
             start = force_from or (latest if latest else start_default)
             rows = fetch_history_safe(code, start, end,
-                                      times=retry_times, base_delay=base_delay, sources=sources)
+                                      times=retry_times, base_delay=base_delay,
+                                      sources=sources, adjust_fallback=adjust_fallback)
             n = S.upsert_daily_bars(conn, code, rows)
             S.set_fetch_log(conn, code, "ok", last_ok_date=end, bars=n)
             S.backfill_list_date(conn, code)

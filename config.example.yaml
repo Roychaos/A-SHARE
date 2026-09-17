@@ -89,9 +89,10 @@ github:
 fetch:
   years_back: 1              # 只保留近1年（更早数据无行情时效性）
   adjust: "qfq"
-  sleep_s: 0.4               # 每股请求间隔(秒)，±50%抖动防限流
-  retry_times: 5             # 每个(源,复权)组合的重试次数
-  base_delay: 2.0            # 重试首次等待秒数（指数退避 x2）
+  sleep_s: 0.35              # 每股请求间隔(秒)，±50%抖动防限流
+  retry_times: 3             # 每(源,复权)组合的尝试次数；失败股的代价≈times次请求+指数退避
+  base_delay: 1.0            # 重试首次等待秒数（指数退避 x2）→ 3次共等 1+2=3 秒
+  adjust_fallback: false     # ★不再"qfq失败→再试不复权"：只跑新浪源时这毫无意义，会让失败成本翻倍
   sources: [sina]            # ★统一用新浪源：稳定、无东财重试浪费（GitHub服务器访问东财常半通）
   bulk_snapshot: true        # ★每日增量优先用整市场快照(1次请求)；失败自动回退逐股
   early_stop_after: 30       # 连续失败达此数即熔断退出（等待后重跑续传）

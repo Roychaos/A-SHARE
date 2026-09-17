@@ -67,6 +67,24 @@ def find_gaps(conn, start: str, end: str) -> tuple[list[str], int, dict[str, int
     return gaps, typical, counts
 
 
+def codes_missing(conn, gaps: list[str]) -> list[str]:
+    """只返回「在这些缺口日期上仍缺数据」的股票 —— 让重跑具备真正的续跑能力。
+
+    首次跑通常是全部股票；若上一次跑到一半被限流/超时中断，
+    已经补齐的股票就会被排除，重跑只处理剩下的，不会从头再来。
+    """
+    if not gaps:
+        return []
+    ph = ",".join("?" * len(gaps))
+    sql = (
+        "SELECT m.code FROM stock_meta m LEFT JOIN ("
+        "  SELECT code, COUNT(DISTINCT date) AS c FROM daily_bar "
+        "  WHERE date IN (%s) GROUP BY code"
+        ") b ON b.code = m.code WHERE COALESCE(b.c, 0) < ?"
+    ) % ph
+    return [r[0] for r in conn.execute(sql, (*gaps, len(gaps)))]
+
+
 def report(conn, start: str, end: str, gaps: list[str], typical: int,
            counts: dict[str, int]) -> None:
     print("")
@@ -87,6 +105,10 @@ def main() -> int:
     ap.add_argument("--to", dest="d_to", default=None, help="窗口终点 ISO（默认库内最新日期）")
     ap.add_argument("--limit", type=int, default=None, help="只处理前 N 只（联调用）")
     ap.add_argument("--codes", default=None, help="只处理指定代码，逗号分隔")
+    ap.add_argument("--all-codes", action="store_true",
+                    help="不做「只补仍缺数据」的过滤，强制对全部股票重拉")
+    ap.add_argument("--sleep", type=float, default=None,
+                    help="覆盖配置里的 fetch.sleep_s（越小越快，也越容易被限流）")
     ap.add_argument("--dry-run", action="store_true", help="只报告缺口，不抓取")
     ap.add_argument("--config", default=None, help="配置文件路径")
     args = ap.parse_args()
@@ -117,21 +139,29 @@ def main() -> int:
 
     # 从第一个缺口前 BUFFER_DAYS 天起重拉，保证形态窗口有上下文
     force_from = (dt.date.fromisoformat(gaps[0]) - dt.timedelta(days=BUFFER_DAYS)).isoformat()
-    logger.info("开始逐股回补：%s ~ %s（股票池约 %d 只，预计 30~180 分钟）",
-                force_from, end, len(S.list_stock_meta(conn)))
 
     codes = None
     if args.codes:
         wanted = {c.strip() for c in args.codes.split(",") if c.strip()}
         codes = [c for c in S.list_codes(conn) if c in wanted]
         logger.info("裁剪到指定 %d 只", len(codes))
+    elif not args.all_codes:
+        codes = codes_missing(conn, gaps)
+        logger.info("只补仍缺数据的股票：%d 只（其余已补齐，跳过）", len(codes))
+        if not codes:
+            logger.info("所有股票都已补齐，无需抓取")
+            conn.close()
+            return 0
+
+    logger.info("开始逐股回补：%s ~ %s（本次约 %d 只，预计 30~180 分钟）",
+                force_from, end, len(codes) if codes else len(S.list_stock_meta(conn)))
 
     stats = fetch_incremental_all(
         conn, cfg,
         codes=codes,
         limit=args.limit,
         date=end,
-        sleep_s=float(cfg_get(cfg, "fetch.sleep_s", 0.4)),
+        sleep_s=args.sleep if args.sleep is not None else float(cfg_get(cfg, "fetch.sleep_s", 0.4)),
         force_from=force_from,
     )
     conn.commit()
