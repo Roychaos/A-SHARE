@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import logging
 import os
 import random
 import sys
@@ -33,11 +34,27 @@ SWEEP_SCENARIOS = [
 
 
 def _trade_dates(conn) -> list[str]:
+    """可回放的交易日列表。
+
+    ★ 必须按「库里真实有行情的最后一天」截断：
+      trade_cal 是**整年**日历（含 2026-12-31 这种未来日期），
+      直接用 dates[-25:] 会取到还没发生的交易日 —— 那些日子库里没有任何行情，
+      于是候选恒为 0、入选恒为 0，回测静默产出 N/A。
+      （2026-09-18 实测：回放区间落在 2026-11-13 ~ 2026-12-17，正是这个 bug。）
+    """
     rows = conn.execute("SELECT date FROM trade_cal ORDER BY date").fetchall()
-    if rows:
-        return [r[0] for r in rows]
-    rows = conn.execute("SELECT DISTINCT date FROM daily_bar ORDER BY date").fetchall()
-    return [r[0] for r in rows]
+    dates = [r[0] for r in rows]
+    if not dates:
+        dates = [r[0] for r in conn.execute("SELECT DISTINCT date FROM daily_bar ORDER BY date")]
+    max_bar = conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
+    if max_bar:
+        future = [d for d in dates if d > max_bar]
+        if future:
+            logging.getLogger("validate").info(
+                "交易日历含 %d 个晚于行情的日期（%s ~ %s），已截断到 %s",
+                len(future), future[0], future[-1], max_bar)
+        dates = [d for d in dates if d <= max_bar]
+    return dates
 
 
 def _run_replay(conn, cfg, dates: list[str], days: int, limit: int | None, offset: int = 0) -> list[dict]:
@@ -47,7 +64,10 @@ def _run_replay(conn, cfg, dates: list[str], days: int, limit: int | None, offse
     else:
         replay = usable[-days:]
     logger = setup_logger("validate")
-    logger.info("回放区间: %s ~ %s（%d 个交易日）", replay[0], replay[-1], len(replay))
+    logger.info("库内行情 %s ~ %s（%d 个交易日可回放）", replay[0], replay[-1], len(replay))
+    max_bar = conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
+    if max_bar and replay[-1] > max_bar:
+        raise RuntimeError(f"回放区间末日 {replay[-1]} 晚于库内行情末日 {max_bar}：回测无效")
 
     picks: list[dict] = []
     for i, d in enumerate(replay, 1):
@@ -193,6 +213,11 @@ def main() -> int:
         print(f"{r['label']:<14}{s['n']:>5}{_pct(s['hit']):>9}{_pct(s['mean']):>9}"
               f"{_pct(r['base']['hit']):>9}{_pct(r['excess_hit']):>10}{_pct(r['excess_mean']):>10}")
     print(f"\n完整报告已写入: {rp}")
+    if all(r["sel"]["n"] == 0 for r in results):
+        print("\n❌ 所有场景入选数都是 0：回测无效，请检查回放区间是否落在有行情的日期上"
+              "（历史 bug：交易日历含未来日期，导致回放跑到未来空数据上）")
+        conn.close()
+        return 3
     conn.close()
     return 0
 

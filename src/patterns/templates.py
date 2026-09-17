@@ -128,9 +128,15 @@ def anchor_date_bounds(conn, params: dict) -> tuple[str, str, str]:
     - load_from 额外前推 (window+60+10) 根，保证窗口/均线/平台高点计算有历史。
     日历缺失时按 1.45 倍粗估工作日。"""
     rows = conn.execute("SELECT date FROM trade_cal ORDER BY date").fetchall()
+    dates = [r[0] for r in rows]
+    # ★ trade_cal 是整年日历（含未来日期），必须按"库里真实有行情的最后一天"截断，
+    #   否则 anchor_end 会落到未来（实测 2026-09-18 时算出 2026-12-17），
+    #   加载窗口整体后移，标注范围与数据范围错位。
+    max_bar = conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
+    if max_bar:
+        dates = [d for d in dates if d <= max_bar]
     L = params["lookback_days"] + params["forward_days"] + 10
-    if len(rows) >= L:
-        dates = [r[0] for r in rows]
+    if len(dates) >= L:
         anchor_start = dates[-params["lookback_days"] - params["forward_days"]]
         anchor_end = dates[-1 - params["forward_days"]]
         buf = params["window"] + 70
