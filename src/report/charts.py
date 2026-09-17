@@ -28,13 +28,18 @@ def make_kline(conn, cfg: dict, code: str, date: str, out_path: str) -> str | No
     except ImportError:
         raise RuntimeError("缺少 pandas/mplfinance，请先: pip install -r requirements.txt")
 
-    df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+    df = pd.DataFrame(
+        [(r["date"], r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows],
+        columns=["Date", "Open", "High", "Low", "Close", "Volume"],
+    )
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.set_index("Date")
     for col in ("Open", "High", "Low", "Close", "Volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    # 空值/NaN 会导致 mplfinance 内部 int 转换报 'float' object cannot be interpreted as an integer
+    n_raw = len(df)
+    nulls = {k: int(v) for k, v in df[["Open", "High", "Low", "Close", "Volume"]].isna().sum().items()}
     df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    logger.warning("%s: 取到 %d 根, 空值=%s, 清洗后 %d 根", code, n_raw, nulls, len(df))
     if len(df) < 30:
         logger.warning("%s: 清洗后K线不足30根，跳过图表", code)
         return None
@@ -42,9 +47,17 @@ def make_kline(conn, cfg: dict, code: str, date: str, out_path: str) -> str | No
     d = os.path.dirname(out_path)
     if d:
         os.makedirs(d, exist_ok=True)
-    mpf.plot(
-        df, type="candle", mav=tuple(ma_windows), volume=True, style="yahoo",
-        title=f"{code}  {date}", ylabel="", ylabel_lower="",
-        savefig=dict(fname=out_path, dpi=110), figsize=(10, 7), tight_layout=True,
-    )
+    try:
+        mpf.plot(
+            df, type="candle", mav=tuple(ma_windows), volume=True, style="yahoo",
+            title=f"{code}  {date}", ylabel="", ylabel_lower="",
+            savefig=dict(fname=out_path, dpi=110), figsize=(10, 7), tight_layout=True,
+        )
+    except Exception:  # noqa: BLE001 volume 面板是常见报错源，降级重试
+        logger.exception("%s: 标准K线图失败，降级(关闭成交量面板)重试", code)
+        mpf.plot(
+            df, type="candle", mav=tuple(ma_windows), volume=False, style="yahoo",
+            title=f"{code}  {date} (no volume)", ylabel="",
+            savefig=dict(fname=out_path, dpi=110), figsize=(10, 7), tight_layout=True,
+        )
     return out_path

@@ -150,10 +150,17 @@ def fetch_bulk_snapshot(conn, date: str) -> int:
     try:
         import akshare as ak
     except ImportError:  # pragma: no cover
+        logger.warning("快照: 缺少 akshare")
         return 0
-    df = ak.stock_zh_a_spot()
-    if df is None or df.empty:
+    try:
+        df = ak.stock_zh_a_spot()
+    except Exception as exc:  # noqa: BLE001 便于诊断（云端/本地都可见）
+        logger.warning("快照接口调用失败: %s: %s", type(exc).__name__, exc)
         return 0
+    if df is None or getattr(df, "empty", True):
+        logger.warning("快照接口返回空数据（新浪全市场接口不可用/被限流）")
+        return 0
+    logger.warning("快照返回 %d 行, 列名: %s", len(df), list(df.columns)[:12])
     c_code = _spot_col(df, "代码")
     c_open, c_high, c_low, c_close = _spot_col(df, "今开", "开盘"), \
         _spot_col(df, "最高"), _spot_col(df, "最低"), _spot_col(df, "最新价", "收盘")
@@ -166,22 +173,31 @@ def fetch_bulk_snapshot(conn, date: str) -> int:
         return 0
 
     filled = 0
+    skipped = 0
     for _, r in df.iterrows():
         try:
-            code = str(r[c_code]).zfill(6)
+            # 新浪快照的代码带交易所前缀（sh600600 / sz000001 / bj920000）→ 只保留6位数字
+            digits = "".join(ch for ch in str(r[c_code]) if ch.isdigit())
+            code = digits.zfill(6) if len(digits) <= 6 else digits[-6:]
             close = _to_float(r[c_close])
             if len(code) != 6 or not code.isdigit() or not close or close <= 0:
+                skipped += 1
                 continue
             row = {"date": date, "open": _to_float(r[c_open]), "high": _to_float(r[c_high]),
                    "low": _to_float(r[c_low]), "close": close,
                    "volume": _to_float(r[c_vol]), "amount": _to_float(r[c_amt]) if c_amt else None,
                    "pct_chg": _to_float(r[c_chg]) if c_chg else None}
             if row["open"] is None or row["high"] is None or row["low"] is None:
+                skipped += 1
                 continue
             S.upsert_daily_bars(conn, code, [row])
             filled += 1
         except Exception:  # noqa: BLE001 单行失败忽略
+            skipped += 1
             continue
+    if filled == 0:
+        logger.warning("快照解析后入库 0 只（跳过 %d 行），例如首行代码=%r",
+                       skipped, str(df.iloc[0][c_code]) if len(df) else "?")
     return filled
 
 
@@ -239,7 +255,10 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
 
     # ★快路径：整市场快照一次入库（把每日 5000 次请求 → 1 次），失败自动回退逐股
     bulk_filled = False
-    if not limit and codes and bool(fetch_cfg.get("bulk_snapshot", True)) and end == dt.date.today().isoformat():
+    after_close = dt.datetime.now().hour >= 15
+    allow_intraday = bool(fetch_cfg.get("bulk_allow_intraday", False))
+    if (not limit and codes and bool(fetch_cfg.get("bulk_snapshot", True))
+            and end == dt.date.today().isoformat() and (after_close or allow_intraday)):
         try:
             filled = fetch_bulk_snapshot(conn, end)
             if filled:

@@ -72,11 +72,13 @@ jobs:
         run: python scripts/run_daily.py --date today --no-push
 
       - name: Checkpoint SQLite (merge WAL into main db)
+        if: always()
         run: |
           python -c "import sqlite3,os; p='data/screener.db';
           os.path.exists(p) and sqlite3.connect(p).execute('PRAGMA wal_checkpoint(TRUNCATE)')"
 
       - name: Persist database for next run
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screener-db
