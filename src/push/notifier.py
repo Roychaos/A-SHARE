@@ -23,11 +23,20 @@ def notify(cfg: dict, images: list[str], md: str, date: str, image_urls: list[st
             elif ch == "serverchan":
                 from src.push import imagehost
                 from src.push import serverchan
-                if image_urls is not None:
-                    urls = image_urls
+                # ★ 免费额度只有 5 条/天，而长正文会被服务端自动分条、每条都计数：
+                #   所以默认走精简模式（正文 ~300 字符，只占 1 条），不再附图片链接。
+                #   想要完整图文请用 wecom（企业微信群机器人，无额度限制，图片直接显示）。
+                if bool(cfg.get("push", {}).get("serverchan_compact", True)):
+                    compact = serverchan.compact_markdown(date, md, cfg)
+                    logger.warning("Server酱走精简模式：正文 %d 字符（完整图文见仓库链接）",
+                                   len(compact))
+                    result["serverchan"] = serverchan.send(f"A股选股 {date}", compact, [])
                 else:
-                    urls = imagehost.upload_images(images, cfg)
-                result["serverchan"] = serverchan.send(f"A股选股 {date}", md, urls)
+                    if image_urls is not None:
+                        urls = image_urls
+                    else:
+                        urls = imagehost.upload_images(images, cfg)
+                    result["serverchan"] = serverchan.send(f"A股选股 {date}", md, urls)
             elif ch == "console":
                 print(f"\n===== 推送内容（console 调试）=====\n{md}")
                 result["console"] = True

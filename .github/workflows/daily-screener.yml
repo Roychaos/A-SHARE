@@ -161,17 +161,43 @@ jobs:
             git push origin main
           fi
 
-      - name: Push report to WeChat (if today has result)
+      # ★ 免费额度只有 5 条/天（且长正文会被服务端自动分条、每条都计数），
+      #   所以这里用「报告内容 md5」做闸门：内容没变就不再推第二次。
+      #   修复/重跑不会白白烧额度；内容真的更新了（比如补好了历史数据）才再推一条。
+      - name: Push report to WeChat (同一份内容只推一次，保护免费额度)
         if: always() && steps.gate.outputs.skip != '1'
         env:
           TZ: Asia/Shanghai
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
         run: |
           today=$(date +%F)
-          if [ -f "output/$today/summary.md" ]; then
-            python scripts/emit_report.py --date "$today" --push-only
-          else
+          md="output/$today/summary.md"
+          marker="output/$today/.pushed"
+          if [ ! -f "$md" ]; then
             echo "$today 无选股结果（非交易日或选股为空），跳过推送"
+            exit 0
+          fi
+          sig=$(md5sum "$md" | cut -d' ' -f1)
+          if [ -f "$marker" ] && [ "$(cat "$marker")" = "$sig" ]; then
+            echo "与已推送内容一致（md5=$sig），跳过推送以保护免费额度"
+            exit 0
+          fi
+          python scripts/emit_report.py --date "$today" --push-only && echo "$sig" > "$marker"
+
+      - name: 提交已推送标记（供后续运行判断）
+        if: always() && steps.gate.outputs.skip != '1'
+        continue-on-error: true
+        run: |
+          today=$(date +%F)
+          [ -f "output/$today/.pushed" ] || exit 0
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -f "output/$today/.pushed"
+          if git diff --cached --quiet; then
+            echo "无变化"
+          else
+            git commit -m "pushed $today"
+            git push origin main || echo "标记提交失败（不影响推送结果）"
           fi
 
       - name: Upload output for debug

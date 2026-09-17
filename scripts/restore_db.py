@@ -104,6 +104,24 @@ def download_artifact(artifact_id: int, dest_zip: str) -> bool:
     return True
 
 
+def _weekday_days(start: str, end: str) -> list[str]:
+    """周一~周五（不含中国节假日）作为"期望交易日"的兜底。
+
+    用于库内交易日历为空的情形 —— 那种库（例如仓库里的 seed.zip）如果直接
+    按"日历里没有的日子就不检查"处理，会把任何库都判成"0 缺失"，
+    正是 2026-09-17 那次把一份最新只到 09-03 的种子库判成 OK 的原因。
+    节假日会带来几天的共同偏差，但所有候选都同样被影响，不影响排序取舍。
+    """
+    out: list[str] = []
+    d = dt.date.fromisoformat(start)
+    last = dt.date.fromisoformat(end)
+    while d <= last:
+        if d.weekday() < 5:
+            out.append(d.isoformat())
+        d += dt.timedelta(days=1)
+    return out
+
+
 def probe(db_file: str) -> tuple[int, str | None, int, list[str]]:
     """返回 (最近30个交易日缺失天数, 最新日期, 总根数, 缺失日期列表)。失败返回 (9999, None, 0, [原因])。
 
@@ -128,13 +146,19 @@ def probe(db_file: str) -> tuple[int, str | None, int, list[str]]:
             "SELECT date, COUNT(*) FROM daily_bar WHERE date >= ? GROUP BY date", (start,)))
         days = [r[0] for r in con.execute(
             "SELECT date FROM trade_cal WHERE date >= ? AND date <= ? ORDER BY date", (start, maxd))]
+        cal_empty = not days
+        if cal_empty:                      # ★ 库内日历为空 → 用周一~周五兜底，绝不静默跳过检查
+            days = _weekday_days(start, maxd)
         con.close()
         vals = [c for c in cnt.values() if c > 0]
         median = int(statistics.median(vals)) if vals else 0
         ref = max(median, max(vals) if vals else 0, universe)
         thr = max(MIN_BARS_PER_DAY, int(ref * MISSING_RATIO))
         missing = [d for d in days if cnt.get(d, 0) < thr]
-        return len(missing), maxd, bars, missing
+        n_missing = len(missing)
+        if cal_empty and missing:
+            missing = missing + ["(库内交易日历为空，按周一~周五估算)"]
+        return n_missing, maxd, bars, missing
     except Exception as exc:  # noqa: BLE001
         return 9999, None, 0, [f"{type(exc).__name__}: {exc}"]
 

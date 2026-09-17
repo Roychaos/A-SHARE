@@ -36,6 +36,7 @@ if ROOT not in sys.path:
 from src.config import cfg_get, load_config  # noqa: E402
 from src.data import store as S  # noqa: E402
 from src.data.fetcher import fetch_incremental_all  # noqa: E402
+from src.utils import calendar as cal  # noqa: E402
 from src.utils.log import setup_logger  # noqa: E402
 from src.utils.net import sanitize_proxy_env  # noqa: E402
 
@@ -138,6 +139,25 @@ def main() -> int:
     logger = setup_logger("fill_gap", cfg_get(cfg, "paths.log"))
 
     conn = S.open_db(db)
+
+    # ★ 先确保交易日历可用（这是"能不能发现缺口"的前提）。
+    #   踩过的坑：云端种子库 seed.zip 里的 trade_cal 是**空的**，
+    #   于是 open_days() 返回空 → 缺口检测"什么都扫不到" → 静默地当成"无缺口"、
+    #   跳过整个补洞流程（2026-09-17 的 repair 跑了 0.1 秒就是这个原因）。
+    #   所以这里绝不能让自己在无日历时静默通过，宁可报错退出。
+    try:
+        cal.ensure_trade_calendar(conn)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("交易日历刷新失败（将尝试使用库内已有日历）: %s: %s", type(exc).__name__, exc)
+    n_cal = int(conn.execute("SELECT COUNT(*) FROM trade_cal").fetchone()[0] or 0)
+    if not n_cal:
+        logger.error("交易日历为空且刷新失败 —— 无法判断哪些交易日缺数据。"
+                     "本次不做任何判断直接退出（避免把'扫不到'误当成'没有缺口'）。")
+        conn.close()
+        return 1
+    logger.info("交易日历可用：%d 条，最新 %s",
+                n_cal, conn.execute("SELECT MAX(date) FROM trade_cal").fetchone()[0])
+
     db_max = conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
     today = dt.date.today().isoformat()
     # ★ 扫描终点必须是「今天」，不能用库里的最新日期：
@@ -151,6 +171,10 @@ def main() -> int:
 
     logger.info("== 空洞扫描 %s ~ %s（库内最新 %s，今天 %s）==",
                 start, scan_end, db_max or "无", today)
+    if not open_days(conn, start, scan_end):
+        logger.error("交易日历在 %s ~ %s 区间内没有任何日期：日历异常，退出", start, scan_end)
+        conn.close()
+        return 1
     gaps, ref, thr, counts = find_gaps(conn, start, scan_end)
     report(conn, start, scan_end, gaps, ref, thr, counts)
     if not gaps:

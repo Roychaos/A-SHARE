@@ -74,7 +74,11 @@ report:
 # ---- 推送（推自己: Server酱；群推: 企业微信群机器人） ----
 push:
   channels: ["serverchan"]     # serverchan=推自己微信; wecom=企业微信群机器人; console=调试
-  image_count: 3               # 发图只数（serverchan 需配 sm.ms 图床 token 才带图）
+  # ★ Server酱免费版只有 5 条/天，且长正文会自动分条、每条都算一次额度。
+  #   compact=true 时只发「日期+Top5 代码/名称/形态分+完整图文链接」（约 1 条额度）；
+  #   false 时发完整 markdown + 图片（实测一次吃掉 5 条，当天后续推送全失败）。
+  serverchan_compact: true
+  image_count: 3               # 发图只数（精简模式下 serverchan 不附图片；wecom 会真的发图）
   disclaimer: "仅供研究参考，不构成任何投资建议。"
   image_host:                  # 图床（serverchan 内嵌图片用，可选）
     provider: smms             # sm.ms 已迁移至 S.EE，代码自动兼容两个端点
