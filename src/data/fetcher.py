@@ -223,6 +223,7 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
                           codes: list[str] | None = None,
                           limit: int | None = None, sleep_s: float = 0.5,
                           fallback_start: str | None = None,
+                          force_from: str | None = None,
                           quiet: bool = False) -> dict:
     """对目标代码逐只增量更新日线（从各自最新已存日期之后开始）。
 
@@ -232,6 +233,9 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
       limit         只处理前 N 只（调试用）
       sleep_s       每只请求间隔（秒），带 ±50% 随机抖动防规律限流
       fallback_start 该股库中无任何数据时回拉的起点(ISO)；None=默认近370天
+      force_from    强制所有股票都从该日期起重拉（ISO）。用于修复历史空洞
+                    （scripts/fill_gap.py）：它会绕过「latest >= end 就跳过」的短路，
+                    这样中间缺失的交易日才会被真正补上。
     其余节流参数读配置 fetch.*（retry_times/base_delay/sources/early_stop_after）。
 
     返回 {codes, bars, failed, stopped_early}
@@ -279,9 +283,9 @@ def fetch_incremental_all(conn, cfg: dict, *, date: str | None = None,
             break
         try:
             latest = S.latest_bar_date(conn, code)
-            if latest and latest >= end:
+            if latest and latest >= end and not force_from:
                 continue  # 已覆盖，跳过
-            start = latest if latest else start_default
+            start = force_from or (latest if latest else start_default)
             rows = fetch_history_safe(code, start, end,
                                       times=retry_times, base_delay=base_delay, sources=sources)
             n = S.upsert_daily_bars(conn, code, rows)
