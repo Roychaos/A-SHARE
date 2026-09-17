@@ -40,8 +40,9 @@ from src.utils.log import setup_logger  # noqa: E402
 from src.utils.net import sanitize_proxy_env  # noqa: E402
 
 BUFFER_DAYS = 5          # 缺口起点前留几天缓冲，保证形态窗口有上下文
-MIN_TYPICAL = 200        # 同期"正常水平"的下限，低于此值不算正常基准
-RATIO = 0.5              # 当日入库数 < 基准 * RATIO 即判为缺口
+MIN_TYPICAL = 200        # 参照值的绝对下限
+RATIO = 0.80             # ★ 当日入库数 < 参照值 × RATIO 即判为缺口
+COVERAGE_TAIL = 12       # 报告里额外打印最近 N 个交易日的每日入库只数（便于人眼核对）
 
 
 def date_counts(conn, start: str, end: str) -> dict[str, int]:
@@ -55,14 +56,26 @@ def open_days(conn, start: str, end: str) -> list[str]:
     return [r[0] for r in conn.execute(sql, (start, end))]
 
 
-def find_gaps(conn, start: str, end: str) -> tuple[list[str], int, dict[str, int]]:
-    """返回 (缺口日期列表, 同期基准股票数, 每日入库数)。"""
+def find_gaps(conn, start: str, end: str) -> tuple[list[str], int, int, dict[str, int]]:
+    """返回 (缺口日期列表, 参照值, 阈值, 每日入库数)。
+
+    参照值 = max(窗口内每日入库数的中位数, 最大值, 股票池只数)。
+    阈值   = 参照值 × RATIO(0.80)。
+
+    为什么不用"中位数的 50%"（踩过的坑）：
+        一次"补到一半就被中断"的运行会留下 旧日期 5200 只 / 新日期 3000 只 的库，
+        中位数仍是 5200、50% 阈值 = 2600 → 3000 只的那些天被误判为完整，
+        半成品库被当成好库采用，缺口就此永久保留。用股票池只数做参照最稳。
+    """
     counts = date_counts(conn, start, end)
     days = open_days(conn, start, end)
     present = [counts[d] for d in days if counts.get(d)]
-    typical = int(statistics.median(present)) if present else 0
-    gaps = [d for d in days if counts.get(d, 0) < max(typical, MIN_TYPICAL) * RATIO]
-    return gaps, typical, counts
+    median = int(statistics.median(present)) if present else 0
+    universe = int(conn.execute("SELECT COUNT(*) FROM stock_meta").fetchone()[0] or 0)
+    ref = max(median, max(present) if present else 0, universe)
+    thr = max(MIN_TYPICAL, int(ref * RATIO))
+    gaps = [d for d in days if counts.get(d, 0) < thr]
+    return gaps, ref, thr, counts
 
 
 def codes_missing(conn, gaps: list[str]) -> list[str]:
@@ -83,17 +96,23 @@ def codes_missing(conn, gaps: list[str]) -> list[str]:
     return [r[0] for r in conn.execute(sql, (*gaps, len(gaps)))]
 
 
-def report(conn, start: str, end: str, gaps: list[str], typical: int,
+def report(conn, start: str, end: str, gaps: list[str], ref: int, thr: int,
            counts: dict[str, int]) -> None:
+    days = open_days(conn, start, end)
     print("")
-    print("交易日覆盖率（只列缺失/偏少的，正常日省略）：")
-    print("  窗口 %s ~ %s，同期正常水平 ≈ %d 只/日" % (start, end, typical))
+    print("交易日覆盖率：")
+    print("  窗口 %s ~ %s" % (start, end))
+    print("  参照值 %d 只（股票池/中位数/最大值取大）→ 阈值 %d 只，低于此值判为缺口" % (ref, thr))
     if not gaps:
         print("  [OK] 无缺口，数据连续")
-        return
-    for d in gaps:
-        print("  [缺口] %s  入库 %d 只（应约 %d 只）" % (d, counts.get(d, 0), typical))
-    print("  合计缺口 %d 个交易日：%s" % (len(gaps), ", ".join(gaps)))
+    else:
+        for d in gaps:
+            print("  [缺口] %s  入库 %d 只（应约 %d 只）" % (d, counts.get(d, 0), ref))
+        print("  合计缺口 %d 个交易日：%s" % (len(gaps), ", ".join(gaps)))
+    tail = days[-COVERAGE_TAIL:]
+    if tail:
+        print("  最近 %d 个交易日入库只数（人眼核对用）：" % len(tail))
+        print("    " + "  ".join("%s:%d" % (d[5:], counts.get(d, 0)) for d in tail))
 
 
 def main() -> int:
@@ -132,8 +151,8 @@ def main() -> int:
 
     logger.info("== 空洞扫描 %s ~ %s（库内最新 %s，今天 %s）==",
                 start, scan_end, db_max or "无", today)
-    gaps, typical, counts = find_gaps(conn, start, scan_end)
-    report(conn, start, scan_end, gaps, typical, counts)
+    gaps, ref, thr, counts = find_gaps(conn, start, scan_end)
+    report(conn, start, scan_end, gaps, ref, thr, counts)
     if not gaps:
         conn.close()
         return 0
@@ -172,11 +191,11 @@ def main() -> int:
     conn.commit()
 
     # 复检
-    gaps2, typical2, counts2 = find_gaps(conn, start, scan_end)
+    gaps2, ref2, thr2, counts2 = find_gaps(conn, start, scan_end)
     logger.info("回补结束：更新 %d 只 / %d 根，失败 %d%s",
                 stats["codes"], stats["bars"], len(stats["failed"]),
                 "（熔断提前停止）" if stats.get("stopped_early") else "")
-    report(conn, start, scan_end, gaps2, typical2, counts2)
+    report(conn, start, scan_end, gaps2, ref2, thr2, counts2)
     conn.close()
 
     if stats.get("stopped_early"):

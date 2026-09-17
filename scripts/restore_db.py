@@ -38,7 +38,8 @@ REPO = os.environ.get("GITHUB_REPOSITORY") or ""
 DB_PATH = os.environ.get("DB_PATH", "data/screener.db")
 NAME = os.environ.get("DB_ARTIFACT_NAME", "screener-db")
 LOOKBACK = int(os.environ.get("DB_LOOKBACK_DAYS", "8"))
-MIN_BARS_PER_DAY = 100      # 当天入库股票数低于此值视为"该日缺失"
+MIN_BARS_PER_DAY = 100      # 绝对下限
+MISSING_RATIO = 0.80        # 当日入库 < 参照值 × 0.80 即算该日缺失（正常交易日入库率约 99.7%）
 GOOD_ENOUGH_MISSING = 0     # 缺失天数 <= 此值且日期够新即立刻采用
 GOOD_ENOUGH_LAG_DAYS = 5    # "日期够新" = 最新日期距今不超过这么多天
 
@@ -97,9 +98,14 @@ def download_artifact(artifact_id: int, dest_zip: str) -> bool:
 def probe(db_file: str) -> tuple[int, str | None, int, list[str]]:
     """返回 (最近30个交易日缺失天数, 最新日期, 总根数, 缺失日期列表)。失败返回 (9999, None, 0, [原因])。
 
-    判定"某日缺失"用的是**相对阈值**（当日入库股票数 < 同期中位数的 50%），
-    而不是绝对阈值 —— 否则一次"补到一半就被中断"的运行留下的库
-    （每天只有 2000 只、其余 3000 只缺）会被误判为完好。
+    判据：某日入库股票数 < max(中位数, 当日最大值, 股票池只数) × 0.80 即算缺失。
+
+    为什么不用"中位数的 50%"（踩过的坑）：
+        一次"补到一半就被中断"的运行，会留下这样一份库 —— 旧日期 5200 只、
+        新日期只有 3000 只。中位数仍是 5200，50% 阈值 = 2600，
+        于是 3000 只的那些天被误判为"完整"，半成品被当成好库采用。
+    为什么不用绝对值：股票池规模会变，且停牌会让正常日也少几十只。
+    现在用股票池只数做参照（正常交易日入库率约 99.7%），0.80 的阈值足够安全。
     """
     try:
         con = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
@@ -107,6 +113,7 @@ def probe(db_file: str) -> tuple[int, str | None, int, list[str]]:
         if not maxd:
             return 9999, None, 0, ["库内无日线"]
         bars = int(con.execute("SELECT COUNT(*) FROM daily_bar").fetchone()[0])
+        universe = int(con.execute("SELECT COUNT(*) FROM stock_meta").fetchone()[0] or 0)
         start = (dt.date.fromisoformat(maxd) - dt.timedelta(days=30)).isoformat()
         cnt = dict(con.execute(
             "SELECT date, COUNT(*) FROM daily_bar WHERE date >= ? GROUP BY date", (start,)))
@@ -115,7 +122,8 @@ def probe(db_file: str) -> tuple[int, str | None, int, list[str]]:
         con.close()
         vals = [c for c in cnt.values() if c > 0]
         median = int(statistics.median(vals)) if vals else 0
-        thr = max(MIN_BARS_PER_DAY, int(median * 0.5))
+        ref = max(median, max(vals) if vals else 0, universe)
+        thr = max(MIN_BARS_PER_DAY, int(ref * MISSING_RATIO))
         missing = [d for d in days if cnt.get(d, 0) < thr]
         return len(missing), maxd, bars, missing
     except Exception as exc:  # noqa: BLE001
