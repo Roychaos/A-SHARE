@@ -61,9 +61,7 @@ def find_gaps(conn, start: str, end: str) -> tuple[list[str], int, dict[str, int
     days = open_days(conn, start, end)
     present = [counts[d] for d in days if counts.get(d)]
     typical = int(statistics.median(present)) if present else 0
-    if typical < MIN_TYPICAL:
-        typical = max(present) if present else 0
-    gaps = [d for d in days if counts.get(d, 0) < typical * RATIO]
+    gaps = [d for d in days if counts.get(d, 0) < max(typical, MIN_TYPICAL) * RATIO]
     return gaps, typical, counts
 
 
@@ -102,7 +100,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="修复库中缺失的交易日（逐股回补）")
     ap.add_argument("--days", type=int, default=60, help="回溯天数（默认 60）")
     ap.add_argument("--from", dest="d_from", default=None, help="窗口起点 ISO（覆盖 --days）")
-    ap.add_argument("--to", dest="d_to", default=None, help="窗口终点 ISO（默认库内最新日期）")
+    ap.add_argument("--to", dest="d_to", default=None,
+                    help="扫描终点 ISO（默认今天；当天由整市场快照负责，不计入缺口）")
     ap.add_argument("--limit", type=int, default=None, help="只处理前 N 只（联调用）")
     ap.add_argument("--codes", default=None, help="只处理指定代码，逗号分隔")
     ap.add_argument("--all-codes", action="store_true",
@@ -120,15 +119,21 @@ def main() -> int:
     logger = setup_logger("fill_gap", cfg_get(cfg, "paths.log"))
 
     conn = S.open_db(db)
-    end = args.d_to or (conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0])
-    if not end:
-        logger.error("库里没有任何日线数据，无需补洞（请先跑 backfill.py）")
-        return 1
+    db_max = conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
+    today = dt.date.today().isoformat()
+    # ★ 扫描终点必须是「今天」，不能用库里的最新日期：
+    #   若库里最新只到 09-03，用库最新日期当终点就只会扫 09-03 之前那一大段（那通常是完整的），
+    #   而把 09-04 ~ 今天 这段真正的缺口漏掉 —— 之前 repair 跑了 80 毫秒就"完成"就是这个原因。
+    end = args.d_to or today
+    # 当天由「整市场快照」负责（1 次请求补全市场），不算缺口；
+    # 否则每个交易日都会把全市场 5000 多只重新拉一遍。
+    scan_end = args.d_to or (dt.date.fromisoformat(today) - dt.timedelta(days=1)).isoformat()
     start = args.d_from or (dt.date.fromisoformat(end) - dt.timedelta(days=args.days)).isoformat()
 
-    logger.info("== 空洞扫描 %s ~ %s ==", start, end)
-    gaps, typical, counts = find_gaps(conn, start, end)
-    report(conn, start, end, gaps, typical, counts)
+    logger.info("== 空洞扫描 %s ~ %s（库内最新 %s，今天 %s）==",
+                start, scan_end, db_max or "无", today)
+    gaps, typical, counts = find_gaps(conn, start, scan_end)
+    report(conn, start, scan_end, gaps, typical, counts)
     if not gaps:
         conn.close()
         return 0
@@ -167,11 +172,11 @@ def main() -> int:
     conn.commit()
 
     # 复检
-    gaps2, typical2, counts2 = find_gaps(conn, start, end)
+    gaps2, typical2, counts2 = find_gaps(conn, start, scan_end)
     logger.info("回补结束：更新 %d 只 / %d 根，失败 %d%s",
                 stats["codes"], stats["bars"], len(stats["failed"]),
                 "（熔断提前停止）" if stats.get("stopped_early") else "")
-    report(conn, start, end, gaps2, typical2, counts2)
+    report(conn, start, scan_end, gaps2, typical2, counts2)
     conn.close()
 
     if stats.get("stopped_early"):

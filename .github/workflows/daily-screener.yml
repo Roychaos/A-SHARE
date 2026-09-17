@@ -57,14 +57,16 @@ jobs:
             echo "skip=0" >> "$GITHUB_OUTPUT"
           fi
 
-      # ★ 以前这里用 actions/download-artifact@v4 + path: . —— v4 默认只能看到「本次运行」的产物，
-      #   所以这一步从上线起就一直是失败的：每次运行都退回 seed.zip（09-05 的旧库），
-      #   而「整市场快照」只补当天、逐股循环又会跳过已覆盖的股票 → 09-05~09-16 的空洞永远补不上，
-      #   形态窗口(25根)和选股结果都是跨着空洞算出来的。现在改为按名字在**全仓库**范围找最新产物。
-      - name: Restore database (全仓最新 screener-db 产物 → seed.zip 兜底)
+      # ★ 历史教训（2026-09-17 查明）：以前这里用 actions/download-artifact@v4 + path: .
+      #   v4 默认只能看「本次运行」的产物 → 这一步从上线起一直失败 → 每次都退回 seed.zip（数据只到 09-03）
+      #   → 每晚都要把 09-04 之后全市场重抓一遍（5213 只，约 3.5 小时），而且中间缺口永远补不上。
+      #   现在改为：按名字列出全仓库未过期产物，**逐个评分挑「最近30个交易日缺口最少」的那个**，
+      #   因为最新产物未必最好（它可能正是从旧种子库起步、带一大段空洞的那次运行留下的）。
+      - name: Restore database (挑最完整的产物 → seed.zip 兜底)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TZ: Asia/Shanghai
         run: |
           mkdir -p data
           if [ -f data/screener.db ]; then
@@ -72,24 +74,8 @@ jobs:
             exit 0
           fi
 
-          echo "== 1) 找全仓库最新的未过期 screener-db 产物（不限 workflow/run） =="
-          art_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=screener-db&per_page=30" \
-            --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].id' \
-            2>/dev/null || true)
-          echo "产物 artifact_id = ${art_id:-无}"
-          if [ -n "$art_id" ] && [ "$art_id" != "null" ]; then
-            if curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
-                 -o /tmp/db.zip \
-                 "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$art_id/zip"; then
-              rm -rf /tmp/dbx && mkdir -p /tmp/dbx
-              python -c "import zipfile; zipfile.ZipFile('/tmp/db.zip').extractall('/tmp/dbx')" || echo "解压失败"
-              found=$(find /tmp/dbx -name '*.db' 2>/dev/null | head -1 || true)
-              if [ -n "$found" ]; then
-                cp "$found" data/screener.db
-                echo "已恢复数据库：$(du -h data/screener.db | cut -f1)"
-              fi
-            fi
-          fi
+          echo "== 1) 从历史产物中挑最完整的一个 =="
+          python scripts/restore_db.py || echo "产物恢复未成功，走 seed.zip 兜底"
 
           echo "== 2) 兜底 seed.zip =="
           if [ ! -f data/screener.db ]; then
@@ -104,7 +90,19 @@ jobs:
                 || echo "无可用种子库（将全量回填）"
             fi
           fi
+
+          echo "== 最终使用的库 =="
           ls -lh data/ | head -5
+          python -c "
+          import sqlite3
+          try:
+              c = sqlite3.connect('file:data/screener.db?mode=ro', uri=True)
+              print('库内最新日期 =', c.execute('select max(date) from daily_bar').fetchone()[0],
+                    '| 总根数 =', c.execute('select count(*) from daily_bar').fetchone()[0],
+                    '| 模板 =', c.execute('select count(*) from template').fetchone()[0])
+          except Exception as e:
+              print('读取失败:', e)
+          "
 
       - uses: actions/setup-python@v5
         with:
