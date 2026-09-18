@@ -134,7 +134,7 @@ jobs:
         continue-on-error: true
         env:
           TZ: Asia/Shanghai
-          BACKTEST_DAYS: '25'      # 回放最近 N 个交易日（每个交易日要全市场算一遍相似度，约 1~2 分钟/日）
+          BACKTEST_DAYS: '250'     # 回放最近 250 个交易日；默认每 10 日取一个非重叠观测 → 约 25 个独立观测
         run: |
           mkdir -p output
           python scripts/validate.py --days "$BACKTEST_DAYS" 2>&1 | tee "output/backtest_$(date +%F).txt"

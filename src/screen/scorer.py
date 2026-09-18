@@ -14,7 +14,7 @@ import logging
 from collections import defaultdict
 
 from src.data import store as S
-from src.patterns.similarity import pearson, template_sim
+from src.patterns.similarity import pearson, template_sim, template_sim_batch
 from src.patterns.templates import _rolling_max, _rolling_mean, _zscore
 from src.screen import factors as F
 from src.signals import rules as R
@@ -329,7 +329,10 @@ def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
     w_price = float(sim_w.get("price", 0.7))
     w_vol = float(sim_w.get("volume", 0.3))
 
-    scored_all: list[dict] = []
+    # ★ 两遍式：第一遍过过滤条件并收集形态窗口，第二遍用 numpy 批量算相似度。
+    #   逐只调用 template_sim 时全市场约 1000 万次 Pearson（纯 Python ≈1 分钟/交易日），
+    #   批量矩阵乘后只需几秒 —— 这是能跑长样本回测（250+ 交易日）的前提。
+    pend: list[tuple[str, list[dict], dict, str | None]] = []
     codes = sorted(groups)
     if limit:
         codes = codes[:limit]
@@ -362,12 +365,16 @@ def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
         if reasons:
             continue
 
-        sim = template_sim(
-            _zscore([r["close"] for r in rows[-w:]]),
-            _vol_window(rows, w), templates,
-            top_matches=top_matches, w_price=w_price, w_vol=w_vol,
-        )
+        pend.append((code, rows, ctx, ind))
 
+    sims = template_sim_batch(
+        [_zscore([r["close"] for r in rows[-w:]]) for _, rows, _, _ in pend],
+        [_vol_window(rows, w) for _, rows, _, _ in pend],
+        templates, top_matches=top_matches, w_price=w_price, w_vol=w_vol,
+    )
+
+    scored_all: list[dict] = []
+    for (code, rows, ctx, ind), sim in zip(pend, sims):
         if factors_on:
             f7_data = _sector_data(code, ind, ind_data) if ind else None
             comp = F.composite_score(ctx, cfg, f7_data, available)
