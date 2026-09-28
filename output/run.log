@@ -111,3 +111,11 @@
 2026-09-25 22:09:35,119 INFO run_daily: 2026-09-25 非交易日，跳过。
 2026-09-25 22:47:08,883 INFO run_daily: == 每日流水线 2026-09-25 开始 ==
 2026-09-25 22:47:08,892 INFO run_daily: 2026-09-25 非交易日，跳过。
+2026-09-29 00:00:11,930 INFO run_daily: == 每日流水线 2026-09-29 开始 ==
+2026-09-29 03:00:41,586 INFO run_daily: 2026-09-29 入选 0 只: []
+2026-09-29 03:00:41,587 INFO run_daily: == 完成: 更新 5207 只 / 10408 根, 失败 7, 入选 0 ==
+2026-09-29 03:00:41,587 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-09-29 03:00:41,587 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-09-29 03:00:41,587 WARNING run_daily: 失败 601238: exceptions must derive from BaseException
+2026-09-29 03:00:41,587 WARNING run_daily: 失败 603400: exceptions must derive from BaseException
+2026-09-29 03:00:41,587 WARNING run_daily: 失败 605303: exceptions must derive from BaseException
