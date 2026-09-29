@@ -119,3 +119,11 @@
 2026-09-29 03:00:41,587 WARNING run_daily: 失败 601238: exceptions must derive from BaseException
 2026-09-29 03:00:41,587 WARNING run_daily: 失败 603400: exceptions must derive from BaseException
 2026-09-29 03:00:41,587 WARNING run_daily: 失败 605303: exceptions must derive from BaseException
+2026-09-30 04:23:13,052 INFO run_daily: == 每日流水线 2026-09-30 开始 ==
+2026-09-30 07:20:53,946 INFO run_daily: 2026-09-30 入选 0 只: []
+2026-09-30 07:20:53,946 INFO run_daily: == 完成: 更新 5207 只 / 5207 根, 失败 7, 入选 0 ==
+2026-09-30 07:20:53,946 WARNING run_daily: 失败 600293: exceptions must derive from BaseException
+2026-09-30 07:20:53,947 WARNING run_daily: 失败 600363: exceptions must derive from BaseException
+2026-09-30 07:20:53,947 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-09-30 07:20:53,947 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-09-30 07:20:53,947 WARNING run_daily: 失败 603400: exceptions must derive from BaseException
