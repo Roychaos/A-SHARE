@@ -195,3 +195,7 @@
 2026-10-13 03:59:40,376 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
 2026-10-13 03:59:40,376 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
 2026-10-13 03:59:40,376 WARNING run_daily: 失败 689009: No value to decode
+2026-10-13 23:17:19,392 INFO run_daily: == 每日流水线 2026-10-13 开始 ==
+2026-10-13 23:18:42,940 INFO run_daily: 2026-10-13 入选 5 只: ['1.002277', '2.002369', '3.002229', '4.688433', '5.000691']
+2026-10-13 23:18:44,050 INFO run_daily: == 完成: 更新 8 只 / 8 根, 失败 1, 入选 5 ==
+2026-10-13 23:18:44,050 WARNING run_daily: 失败 689009: No value to decode
