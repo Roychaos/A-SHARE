@@ -207,3 +207,11 @@
 2026-10-14 03:33:02,612 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
 2026-10-14 03:33:02,612 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
 2026-10-14 03:33:02,612 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-10-14 21:06:20,569 INFO run_daily: == 每日流水线 2026-10-14 开始 ==
+2026-10-15 00:42:07,381 INFO run_daily: 2026-10-14 入选 5 只: ['1.000777', '2.600754', '3.600415', '4.002444', '5.600258']
+2026-10-15 00:42:09,117 INFO run_daily: == 完成: 更新 5208 只 / 10410 根, 失败 6, 入选 5 ==
+2026-10-15 00:42:09,117 WARNING run_daily: 失败 600293: exceptions must derive from BaseException
+2026-10-15 00:42:09,117 WARNING run_daily: 失败 600825: exceptions must derive from BaseException
+2026-10-15 00:42:09,117 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-10-15 00:42:09,117 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-10-15 00:42:09,117 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
