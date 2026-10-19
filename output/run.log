@@ -229,3 +229,11 @@
 2026-10-19 23:01:43,143 WARNING run_daily: 失败 601059: No value to decode
 2026-10-19 23:01:43,143 WARNING run_daily: 失败 601198: No value to decode
 2026-10-19 23:01:43,143 WARNING run_daily: 失败 689009: No value to decode
+2026-10-20 00:39:35,940 INFO run_daily: == 每日流水线 2026-10-20 开始 ==
+2026-10-20 03:20:34,588 INFO run_daily: 2026-10-20 入选 0 只: []
+2026-10-20 03:20:34,588 INFO run_daily: == 完成: 更新 5206 只 / 5206 根, 失败 8, 入选 0 ==
+2026-10-20 03:20:34,589 WARNING run_daily: 失败 600293: exceptions must derive from BaseException
+2026-10-20 03:20:34,589 WARNING run_daily: 失败 601059: No value to decode
+2026-10-20 03:20:34,589 WARNING run_daily: 失败 601198: No value to decode
+2026-10-20 03:20:34,589 WARNING run_daily: 失败 603517: exceptions must derive from BaseException
+2026-10-20 03:20:34,589 WARNING run_daily: 失败 603759: exceptions must derive from BaseException
