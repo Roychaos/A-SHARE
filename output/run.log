@@ -277,3 +277,10 @@
 2026-10-27 03:03:17,294 WARNING run_daily: 失败 601059: No value to decode
 2026-10-27 03:03:17,294 WARNING run_daily: 失败 601198: No value to decode
 2026-10-27 03:03:17,294 WARNING run_daily: 失败 601326: exceptions must derive from BaseException
+2026-10-27 21:35:50,321 INFO run_daily: == 每日流水线 2026-10-27 开始 ==
+2026-10-27 21:37:40,034 INFO run_daily: 2026-10-27 入选 5 只: ['1.601328', '2.003816', '3.601288', '4.600985', '5.600900']
+2026-10-27 21:37:42,485 INFO run_daily: == 完成: 更新 3 只 / 3 根, 失败 4, 入选 5 ==
+2026-10-27 21:37:42,485 WARNING run_daily: 失败 000016: No value to decode
+2026-10-27 21:37:42,485 WARNING run_daily: 失败 601059: No value to decode
+2026-10-27 21:37:42,485 WARNING run_daily: 失败 601198: No value to decode
+2026-10-27 21:37:42,485 WARNING run_daily: 失败 689009: No value to decode
