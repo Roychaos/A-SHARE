@@ -284,3 +284,11 @@
 2026-10-27 21:37:42,485 WARNING run_daily: 失败 601059: No value to decode
 2026-10-27 21:37:42,485 WARNING run_daily: 失败 601198: No value to decode
 2026-10-27 21:37:42,485 WARNING run_daily: 失败 689009: No value to decode
+2026-10-28 22:31:42,606 INFO run_daily: == 每日流水线 2026-10-28 开始 ==
+2026-10-28 22:33:25,364 INFO run_daily: 2026-10-28 入选 5 只: ['1.600378', '2.301013', '3.688679', '4.603045', '5.600172']
+2026-10-28 22:33:26,577 INFO run_daily: == 完成: 更新 3 只 / 3 根, 失败 5, 入选 5 ==
+2026-10-28 22:33:26,577 WARNING run_daily: 失败 000016: No value to decode
+2026-10-28 22:33:26,578 WARNING run_daily: 失败 301139: No value to decode
+2026-10-28 22:33:26,578 WARNING run_daily: 失败 601059: No value to decode
+2026-10-28 22:33:26,578 WARNING run_daily: 失败 601198: No value to decode
+2026-10-28 22:33:26,578 WARNING run_daily: 失败 689009: No value to decode
