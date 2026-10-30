@@ -287,15 +287,36 @@ def _limit_pct(code: str) -> float:
     return 0.195 if code.startswith(("300", "301", "688", "689")) else 0.095
 
 
-def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
-                       persist: bool = True) -> list[dict]:
+def _template_cutoff(conn, date: str, forward_days: int) -> str:
+    """模板锚点的最晚可用日期（防前视偏差）。
+
+    一个锚点要被认定为"赢家"，需要它之后 forward_days 个交易日的涨幅已经发生。
+    若只用 `anchor_date < date`，那么在 date 当天其实还看不到最近 forward_days 天
+    那几个锚点的结果 —— 模板库就"提前知道"了未来，构成 look-ahead bias。
+    正确做法：锚点必须早于 date 往前数 forward_days 个交易日。
+    """
+    rows = conn.execute(
+        "SELECT date FROM trade_cal WHERE date <= ? ORDER BY date DESC LIMIT ?",
+        (date, forward_days + 1)).fetchall()
+    if len(rows) >= forward_days + 1:
+        return rows[-1][0]
+    return (dt.date.fromisoformat(date) - dt.timedelta(days=int(forward_days * 1.5))).isoformat()
+
+
+def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> list[dict]:
+    """给**全市场**打分（不做 Top N 截断），用于回测 / IC 检验 / 选股内部复用。
+
+    返回 [{date, code, industry, score, sim_score, sig_score, trend_score, factors, ...}]。
+    """
     w = int(cfg.get("learning", {}).get("window", 25))
     from_dt = dt.date.fromisoformat(date) - dt.timedelta(days=int((w + 120) * 1.45) + 30)
     from_iso = from_dt.isoformat()
 
+    forward_days = int(cfg.get("learning", {}).get("forward_days", 10))
+    tpl_cutoff = _template_cutoff(conn, date, forward_days)
     tpl_rows = conn.execute(
-        "SELECT id,code,anchor_date,fwd_ret_10d,w_close,w_vol FROM template WHERE anchor_date < ?",
-        (date,),
+        "SELECT id,code,anchor_date,fwd_ret_10d,w_close,w_vol FROM template WHERE anchor_date <= ?",
+        (tpl_cutoff,),
     ).fetchall()
     tpl_cols = ("id", "code", "anchor_date", "fwd_ret_10d", "w_close", "w_vol")
     templates = [dict(zip(tpl_cols, r)) for r in tpl_rows]
@@ -380,8 +401,10 @@ def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
             comp = F.composite_score(ctx, cfg, f7_data, available)
             sig = comp.get("signal_score")
             hits = [f"{f['name']}={f['score']:.0f}" for f in comp["factors"] if f["score"] > 0]
+            factor_scores = {f["key"]: f["score"] for f in comp["factors"]}
             combined = _combine(sim.get("pattern_score"), sig, _trend_score(ctx), hits, sim, cfg)
         else:
+            factor_scores = {}
             combined = score_components(rows, cfg, sim)
 
         if combined is None or combined.get("total") is None:
@@ -391,9 +414,19 @@ def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
             "industry": ind,
             "score": combined["total"], "sim_score": combined["sim"],
             "sig_score": combined["signal_max"], "trend_score": combined["trend"],
-            "hits": combined["hits"], "matched_tpl_id": combined["best_tpl_id"],
+            "hits": combined["hits"], "factors": factor_scores,
+            "matched_tpl_id": combined["best_tpl_id"],
             "best_tpl_code": combined["best_code"], "best_tpl_anchor": combined["best_anchor"],
         })
+
+    logger.info("%s: 完成全市场打分 %d 只（模板可用到 %s）", date, len(scored_all), tpl_cutoff)
+    return scored_all
+
+
+def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
+                       persist: bool = True) -> list[dict]:
+    """全市场打分 → 日级闸门 → 取 Top N（生产入口）。"""
+    scored_all = score_universe(conn, cfg, date, limit=limit)
 
     # ★ 日级闸门（可选）：只有当"今天的最高分"达到历史参照水平时才出手。
     #   为什么需要它：任何"股票级"门槛（分位数/绝对分）在"总是取 Top N"的结构下
@@ -411,8 +444,7 @@ def compute_and_select(conn, cfg: dict, date: str, *, limit: int | None = None,
         s["rank"] = i
     if persist and selected:
         S.replace_scan_results(conn, date, selected)
-    logger.info("%s: 候选 %d 只，入选 Top%d，因子层=%s", date, len(scored_all),
-                len(selected), "高级7因子" if factors_on else "旧5信号")
+    logger.info("%s: 候选 %d 只，入选 Top%d", date, len(scored_all), len(selected))
     return selected
 
 

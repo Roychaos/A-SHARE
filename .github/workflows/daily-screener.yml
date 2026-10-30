@@ -127,17 +127,25 @@ jobs:
           TZ: Asia/Shanghai
         run: python scripts/fill_gap.py --days 45
 
-      # 只在手动选 backtest 模式时跑：样本外回放，结果写进 output/ 并随仓库提交
+      # 只在手动选 backtest 模式时跑：组合回放 + 逐因子 RankIC 检验，结果写进 output/ 并随仓库提交
       # （不选股、不推送，避免消耗 Server酱 免费额度）
-      - name: 样本外回测（仅 backtest 模式，20~60 分钟）
+      - name: 样本外回测 + RankIC 检验（仅 backtest 模式，15~30 分钟）
         if: steps.gate.outputs.mode == 'backtest'
         continue-on-error: true
         env:
           TZ: Asia/Shanghai
-          BACKTEST_DAYS: '250'     # 回放最近 250 个交易日；默认每 10 日取一个非重叠观测 → 约 25 个独立观测
+          BT_DAYS: '250'           # 回看最近 250 个交易日
+          BT_STEP: '5'             # 每 5 个交易日取 1 个样本（≈每周决策）
+          BT_HOLD: '20'            # 持有 20 个交易日（4 周）
         run: |
           mkdir -p output
-          python scripts/validate.py --days "$BACKTEST_DAYS" 2>&1 | tee "output/backtest_$(date +%F).txt"
+          echo "===== 1) 组合回放：周度选股 / 持有 20 日 / 同日配对基准 / 扣成本 ====="
+          python scripts/validate.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
+            2>&1 | tee "output/backtest_$(date +%F).txt"
+          echo ""
+          echo "===== 2) 逐因子 RankIC 检验（全市场横截面）====="
+          python scripts/ic_test.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" --quantiles \
+            2>&1 | tee "output/ic_test_$(date +%F).txt"
 
       - name: Run daily pipeline (fetch -> learn -> select -> cards, no push yet)
         if: steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'

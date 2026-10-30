@@ -181,18 +181,25 @@ def _mean(xs: list[float]) -> float | None:
     return (sum(xs) / len(xs)) if xs else None
 
 
-def _summarize(per_day: list[dict], label: str) -> dict:
-    """以"交易日"为观测单位做配对统计（非重叠采样后各观测才近似独立）。"""
+def _summarize(per_day: list[dict], label: str, overlap: int = 1) -> dict:
+    """以"交易日"为观测单位做配对统计（非重叠采样后各观测才近似独立）。
+
+    overlap = 持有期 / 采样步长：>1 说明观测窗口重叠，t 值会被高估，
+    因此额外给出保守的 t_adj = t / √overlap。
+    """
     out = {"label": label}
     for key in ("real", "ideal"):
         ex = [d[f"picks_{key}"] - d[f"mkt_{key}"] for d in per_day
               if d.get(f"picks_{key}") is not None and d.get(f"mkt_{key}") is not None]
+        t, p = _tstat(ex)
         out[key] = {
             "n_days": len(ex),
             "excess_mean": _mean(ex),
             "excess_median": (sorted(ex)[len(ex) // 2] if ex else None),
             "win_rate": (sum(1 for x in ex if x > 0) / len(ex)) if ex else None,
-            "t": _tstat(ex)[0], "p": _tstat(ex)[1],
+            "t": t,
+            "t_adj": (t / math.sqrt(overlap)) if (t is not None and overlap > 1) else t,
+            "p": p,
             "trim1": _mean(sorted(ex)[:-1]) if len(ex) > 3 else None,
             "trim2": _mean(sorted(ex)[:-2]) if len(ex) > 4 else None,
             "trim3": _mean(sorted(ex)[:-3]) if len(ex) > 5 else None,
@@ -226,15 +233,16 @@ def _main_report(results: list[dict], day_list: list[str], hold: int, cost: floa
          f"- 持有期: {hold} 个交易日；成交假设: **{('T+1 开盘买入' if entry == 'open' else '当日收盘买入')}"
          f"**，扣双边成本 {cost*100:.2f}%",
          f"- 基准: **同日全市场等权平均**（非ST、价格≥2元）", "",
-         "| 场景 | 选股日 | 持仓 | 现实平均 | 市场平均 | **配对超额** | 超额胜率 | t 值 | p 值 |",
-         "|---|---|---|---|---|---|---|---|---|"]
+         "| 场景 | 选股日 | 持仓 | 现实平均 | 市场平均 | **配对超额** | 超额胜率 | t 值 | t_adj | p 值 |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         rr = r["real"]
         t_s = f"{rr['t']:.2f}" if rr["t"] is not None else "N/A"
+        ta_s = f"{rr['t_adj']:.2f}" if rr["t_adj"] is not None else "N/A"
         p_s = f"{rr['p']:.3f}" if rr["p"] is not None else "N/A"
         L.append(f"| {r['label']} | {rr['n_days']} | {r['n_picks']} | {_pct(r.get('picks_real_mean'))} "
                  f"| {_pct(r.get('mkt_real_mean'))} | **{_pct(rr['excess_mean'])}** "
-                 f"| {_pct0(rr['win_rate'], 0)} | {t_s} | {p_s} |")
+                 f"| {_pct0(rr['win_rate'], 0)} | {t_s} | {ta_s} | {p_s} |")
     L += ["", "## 稳健性：剔除最好的几天之后还剩多少超额（现实口径）", "",
           "| 场景 | 全部 | 剔最好1天 | 剔最好2天 | 剔最好3天 |", "|---|---|---|---|---|"]
     for r in results:
@@ -271,6 +279,8 @@ def main() -> int:
     ap.add_argument("--offset", type=int, default=0, help="跳过最近 N 个交易日（做更早的样本）")
     ap.add_argument("--limit", type=int, default=None, help="只扫描前 N 只（联调加速）")
     ap.add_argument("--cost", type=float, default=0.0015, help="双边成本（佣金+印花税+滑点，默认0.15%%）")
+    ap.add_argument("--hold", type=int, default=None,
+                    help="持有期（交易日）；默认取 learning.forward_days（周度策略建议 20）")
     ap.add_argument("--entry", choices=["open", "close"], default="open",
                     help="成交口径：open=T+1开盘买入（现实，默认）；close=当日收盘买入（理想）")
     ap.add_argument("--config", default=None, help="配置文件路径")
@@ -281,7 +291,7 @@ def main() -> int:
     cfg = load_config(args.config)
     db = cfg_get(cfg, "paths.db", "data/screener.db")
     setup_logger("validate", cfg_get(cfg, "paths.log"))
-    hold = int(cfg_get(cfg, "learning.forward_days", 10))
+    hold = args.hold if args.hold else int(cfg_get(cfg, "learning.forward_days", 10))
     step = args.step if args.step else hold
 
     conn = S.open_db(db)
@@ -308,13 +318,14 @@ def main() -> int:
         scenarios = [("single", None)]
 
     results = []
+    overlap = max(1, int(round(hold / max(1, step))))
     for label, w in scenarios:
         cfg2 = dict(cfg)
         if w is not None:
             cfg2["scoring"] = dict(cfg.get("scoring", {}))
             cfg2["scoring"]["weights"] = w
         picks, per_day = _run_replay(conn, cfg2, dates, day_list, args.limit, hold, args.cost, args.entry)
-        s = _summarize(per_day, label)
+        s = _summarize(per_day, label, overlap)
         s["picks"], s["per_day"] = picks, per_day
         results.append(s)
 
@@ -327,15 +338,16 @@ def main() -> int:
 
     print("\n=== 同日配对结果（现实口径：%s + 成本 %.2f%%）==="
           % ("T+1开盘" if args.entry == "open" else "当日收盘", args.cost * 100))
-    print(f"{'场景':<14}{'选股日':>6}{'持仓':>6}{'入选':>9}{'市场':>9}{'配对超额':>10}{'胜率':>7}{'t':>7}{'p':>8}")
+    print(f"{'场景':<14}{'选股日':>6}{'持仓':>6}{'入选':>9}{'市场':>9}{'配对超额':>10}{'胜率':>7}{'t':>7}{'t_adj':>7}{'p':>8}")
     for r in results:
         rr = r["real"]
         t_s = f"{rr['t']:.2f}" if rr["t"] is not None else "N/A"
+        ta_s = f"{rr['t_adj']:.2f}" if rr["t_adj"] is not None else "N/A"
         p_s = f"{rr['p']:.3f}" if rr["p"] is not None else "N/A"
         print(f"{r['label']:<14}{rr['n_days']:>6}{r['n_picks']:>6}"
               f"{_pct(r.get('picks_real_mean')):>9}{_pct(r.get('mkt_real_mean')):>9}"
               f"{_pct(rr['excess_mean']):>10}{_pct0(rr['win_rate'], 0):>7}"
-              f"{t_s:>7}{p_s:>8}")
+              f"{t_s:>7}{ta_s:>7}{p_s:>8}")
         print(f"{'  └ 剔除最好1/2/3天后的超额':<28}{_pct(rr['trim1'])} / {_pct(rr['trim2'])} / {_pct(rr['trim3'])}")
     print(f"\n完整报告已写入: {rp}")
     conn.close()
