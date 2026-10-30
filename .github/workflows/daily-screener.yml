@@ -141,7 +141,7 @@ jobs:
           mkdir -p output
           echo "===== 1) 组合回放：周度选股 / 持有 20 日 / 同日配对基准 / 扣成本 ====="
           python scripts/validate.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
-            2>&1 | tee "output/backtest_$(date +%F).txt"
+            --widths "5,20,10%" 2>&1 | tee "output/backtest_$(date +%F).txt"
           echo ""
           echo "===== 2) 逐因子 RankIC 检验（全市场横截面）====="
           python scripts/ic_test.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" --quantiles \

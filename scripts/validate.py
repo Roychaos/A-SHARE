@@ -31,7 +31,7 @@ if ROOT not in sys.path:
 
 from src.config import cfg_get, load_config  # noqa: E402
 from src.data import store as S  # noqa: E402
-from src.screen.scorer import compute_and_select  # noqa: E402
+from src.screen.scorer import score_universe, select_top  # noqa: E402
 from src.utils.log import setup_logger  # noqa: E402
 
 SWEEP_SCENARIOS = [
@@ -112,55 +112,74 @@ def _market_day(conn, d0: str, d1: str, d10: str, cost: float, price_min: float)
 
 # ---------------- 回放 ----------------
 
+def _width_of(spec, n_scored: int) -> int:
+    """把宽度写法转成只数：'5' → 5；'10%' → 全截面的 10%（至少 5 只）。"""
+    s = str(spec).strip()
+    if s.endswith("%"):
+        return max(5, int(round(float(s[:-1]) / 100.0 * n_scored)))
+    return max(1, int(s))
+
+
 def _run_replay(conn, cfg, dates: list[str], day_list: list[str], limit: int | None,
-                hold: int, cost: float, entry: str) -> tuple[list[dict], list[dict]]:
+                hold: int, cost: float, entry: str,
+                widths: list[str]) -> dict[str, dict]:
+    """一次全市场打分 → 多个组合宽度同时评估（避免每个宽度重算相似度，省数倍时间）。"""
     logger = setup_logger("validate")
     if not day_list:
         raise RuntimeError("没有可回放的选股日（数据长度不足）")
     idx = {d: i for i, d in enumerate(dates)}
     price_min = float(cfg_get(cfg, "universe.exclude_price_below", 2.0))
-    logger.info("回放区间 %s ~ %s（%d 个选股日，持有 %d 个交易日）",
-                day_list[0], day_list[-1], len(day_list), hold)
+    logger.info("回放区间 %s ~ %s（%d 个选股日，持有 %d 日，宽度 %s）",
+                day_list[0], day_list[-1], len(day_list), hold, ",".join(widths))
 
-    picks: list[dict] = []
-    per_day: list[dict] = []
+    out: dict[str, dict] = {w: {"picks": [], "per_day": []} for w in widths}
     for i, d in enumerate(day_list, 1):
         j = idx[d]
         if j + hold >= len(dates):
             continue
         d1, d10 = dates[j + 1], dates[j + hold]
         mkt = _market_day(conn, d, d1, d10, cost, price_min)
-        selected = compute_and_select(conn, cfg, d, limit=limit, persist=False)
-        rows = []
-        for s in selected:
-            code = s["code"]
-            c0 = S.close_on(conn, code, d)
-            c10 = S.close_on_or_before(conn, code, d10)
-            op1 = _entry_price(conn, code, d1, d) if entry == "open" else c0
-            ideal = (c10 / c0 - 1.0) if (c0 and c10 and c0 > 0) else None
-            if entry == "open":
-                real = (c10 / op1 - 1.0 - cost) if (op1 and c10 and op1 > 0) else None
-            else:
-                real = (ideal - cost) if ideal is not None else None
-            rows.append({"date": d, "code": code, "score": s.get("score"),
-                         "ideal": ideal, "real": real})
-        picks.extend(rows)
-        rec = {"date": d, "n": len(rows)}
-        for key in ("ideal", "real"):
-            vals = [r[key] for r in rows if r[key] is not None]
-            rec[f"picks_{key}"] = (sum(vals) / len(vals)) if vals else None
-        rec["picks_hit"] = None
-        rv = [r["real"] for r in rows if r["real"] is not None]
-        if rv:
-            rec["picks_hit"] = sum(1 for x in rv if x > 0) / len(rv)
-        if mkt:
-            rec["mkt_ideal"] = mkt["ideal"]
-            rec["mkt_real"] = mkt["real"]
-            rec["mkt_hit"] = mkt["hit"]
-        per_day.append(rec)
+        scored = score_universe(conn, cfg, d, limit=limit)
+        if not scored:
+            continue
+        for w in widths:
+            n_w = _width_of(w, len(scored))
+            scoring = dict(cfg.get("scoring", {}) or {})
+            scoring["top_n"] = n_w
+            if n_w >= 50:                 # 宽组合不应被"前2%"候选池卡住
+                scoring["min_percentile"] = None
+                scoring["min_score"] = None
+            sel = select_top(scored, {"scoring": scoring})
+            rows = []
+            for s in sel:
+                code = s["code"]
+                c0 = S.close_on(conn, code, d)
+                c10 = S.close_on_or_before(conn, code, d10)
+                op1 = _entry_price(conn, code, d1, d) if entry == "open" else c0
+                ideal = (c10 / c0 - 1.0) if (c0 and c10 and c0 > 0) else None
+                if entry == "open":
+                    real = (c10 / op1 - 1.0 - cost) if (op1 and c10 and op1 > 0) else None
+                else:
+                    real = (ideal - cost) if ideal is not None else None
+                rows.append({"date": d, "code": code, "score": s.get("score"),
+                             "ideal": ideal, "real": real})
+            out[w]["picks"].extend(rows)
+            rec = {"date": d, "n": len(rows)}
+            for key in ("ideal", "real"):
+                vals = [r[key] for r in rows if r[key] is not None]
+                rec[f"picks_{key}"] = (sum(vals) / len(vals)) if vals else None
+            rec["picks_hit"] = None
+            rv = [r["real"] for r in rows if r["real"] is not None]
+            if rv:
+                rec["picks_hit"] = sum(1 for x in rv if x > 0) / len(rv)
+            if mkt:
+                rec["mkt_ideal"] = mkt["ideal"]
+                rec["mkt_real"] = mkt["real"]
+                rec["mkt_hit"] = mkt["hit"]
+            out[w]["per_day"].append(rec)
         if i % 5 == 0 or i == len(day_list):
-            logger.info("回放进度 %d/%d，累计入选 %d", i, len(day_list), len(picks))
-    return picks, per_day
+            logger.info("回放进度 %d/%d（宽度 %s）", i, len(day_list), ",".join(widths))
+    return out
 
 
 # ---------------- 统计 ----------------
@@ -259,7 +278,10 @@ def _main_report(results: list[dict], day_list: list[str], hold: int, cost: floa
         p_s = f"{ri['p']:.3f}" if ri["p"] is not None else "N/A"
         L.append(f"| {r['label']} | {_pct(ri['excess_mean'])} | {_pct0(ri['win_rate'], 0)} "
                  f"| {t_s} | {p_s} |")
+    # 逐日明细只输出 single 场景（sweep 时会有十几组，报告会太长）
     for r in results:
+        if not str(r["label"]).startswith("single"):
+            continue
         L += ["", f"## 逐日明细：{r['label']}", "",
               "| 日期 | 持仓 | 入选(现实) | 入选(理想) | 市场(现实) | 市场(理想) | 配对超额 | 入选胜率 | 市场胜率 |",
               "|---|---|---|---|---|---|---|---|---|"]
@@ -283,6 +305,8 @@ def main() -> int:
     ap.add_argument("--cost", type=float, default=0.0015, help="双边成本（佣金+印花税+滑点，默认0.15%%）")
     ap.add_argument("--hold", type=int, default=None,
                     help="持有期（交易日）；默认取 learning.forward_days（周度策略建议 20）")
+    ap.add_argument("--widths", default="5,20,10%",
+                    help="同时评估的组合宽度，逗号分隔；'5'=前5只，'10%%'=全截面前10%%（默认 5,20,10%%）")
     ap.add_argument("--entry", choices=["open", "close"], default="open",
                     help="成交口径：open=T+1开盘买入（现实，默认）；close=当日收盘买入（理想）")
     ap.add_argument("--config", default=None, help="配置文件路径")
@@ -321,15 +345,19 @@ def main() -> int:
 
     results = []
     overlap = max(1, int(round(hold / max(1, step))))
+    widths = [w.strip() for w in (args.widths or "5,20,10%").split(",") if w.strip()]
     for label, w in scenarios:
         cfg2 = dict(cfg)
         if w is not None:
             cfg2["scoring"] = dict(cfg.get("scoring", {}))
             cfg2["scoring"]["weights"] = w
-        picks, per_day = _run_replay(conn, cfg2, dates, day_list, args.limit, hold, args.cost, args.entry)
-        s = _summarize(per_day, label, overlap)
-        s["picks"], s["per_day"] = picks, per_day
-        results.append(s)
+        replay = _run_replay(conn, cfg2, dates, day_list, args.limit, hold,
+                             args.cost, args.entry, widths)
+        for wd in widths:
+            s = _summarize(replay[wd]["per_day"], f"{label}/Top{wd}", overlap)
+            s["picks"] = replay[wd]["picks"]
+            s["per_day"] = replay[wd]["per_day"]
+            results.append(s)
 
     out_dir = cfg_get(cfg, "paths.output", "output")
     os.makedirs(out_dir, exist_ok=True)

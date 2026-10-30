@@ -349,6 +349,7 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
     sim_w = cfg.get("learning", {}).get("sim_weights", {})
     w_price = float(sim_w.get("price", 0.7))
     w_vol = float(sim_w.get("volume", 0.3))
+    sim_metric = str(cfg.get("learning", {}).get("sim_metric", "pearson"))
 
     # ★ 两遍式：第一遍过过滤条件并收集形态窗口，第二遍用 numpy 批量算相似度。
     #   逐只调用 template_sim 时全市场约 1000 万次 Pearson（纯 Python ≈1 分钟/交易日），
@@ -392,6 +393,7 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
         [_zscore([r["close"] for r in rows[-w:]]) for _, rows, _, _ in pend],
         [_vol_window(rows, w) for _, rows, _, _ in pend],
         templates, top_matches=top_matches, w_price=w_price, w_vol=w_vol,
+        metric=sim_metric,
     )
 
     scored_all: list[dict] = []

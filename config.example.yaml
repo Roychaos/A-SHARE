@@ -21,7 +21,11 @@ learning:
     prior60_range: [-0.05, 0.25]
   window: 25
   max_templates_per_day: 20
-  sim_weights: {price: 0.7, volume: 0.3}
+  # ★ 2026-10-30 参数扫描结论（43 个样本 × 每日约 5200 只，两套独立数据复现）：
+  #   量能权重 0.5 > 0.3 > 0（原来给少了）；Spearman(rank) 略优于 Pearson；
+  #   最优变体 rank_vol50_top3：IC_IR 1.07、t_adj 3.50、正IC 88%、前10%-后10% +2.72%/20日。
+  sim_weights: {price: 0.5, volume: 0.5}
+  sim_metric: rank            # pearson | rank（rank = Spearman，抗极端值）
   top_matches: 3
 
 # ---- 旧版5信号（已被 factors 体系取代，保留作回退/对照，默认关闭） ----
@@ -41,7 +45,8 @@ scoring:
   min_percentile: 0.02        # 候选池上界（只保留当日最高的 2%）。注意：在"总是取 Top N"结构下，
                               # 它**不改变选出的票**（前2%里取前5 = 全市场取前5），只用于限定 max_per_industry 的取数范围。
   min_score: null             # 绝对分下限（可选）。若启用请按实测分布取值：99.9%→94.55, 99%→93.58, 95%→92.64
-  top_n: 5
+  top_n: 20                   # ★ 5 → 20：IC 已显著（IC_IR≈1.07），但 5 只票的噪声使组合绩效无法被验证；
+                              #   20 只把单期超额标准差从约 5.5% 降到约 3%，才有统计功效。
   max_per_industry: 2
   # ★ 唯一真正有过滤效果的闸门：日级闸门（"今天到底该不该出手"）
   #   所有股票级门槛都不改变 Top5（见 tests/test_score_gate.py 的断言），
