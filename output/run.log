@@ -401,3 +401,5 @@
 2026-10-30 22:33:46,653 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
 2026-10-30 22:33:46,653 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
 2026-10-30 22:33:46,653 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-10-31 00:17:22,390 INFO run_daily: == 每日流水线 2026-10-31 开始 ==
+2026-10-31 00:17:22,395 INFO run_daily: 2026-10-31 非交易日，跳过。
