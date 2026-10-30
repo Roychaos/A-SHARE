@@ -146,6 +146,10 @@ jobs:
           echo "===== 2) 逐因子 RankIC 检验（全市场横截面）====="
           python scripts/ic_test.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" --quantiles \
             2>&1 | tee "output/ic_test_$(date +%F).txt"
+          echo ""
+          echo "===== 3) 形态信号参数扫描（度量 × 量能权重 × 聚合方式）====="
+          python scripts/pattern_scan.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
+            2>&1 | tee "output/pattern_scan_$(date +%F).txt"
 
       - name: Run daily pipeline (fetch -> learn -> select -> cards, no push yet)
         if: steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'

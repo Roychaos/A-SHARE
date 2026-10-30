@@ -204,14 +204,15 @@ def _summarize(per_day: list[dict], label: str, overlap: int = 1) -> dict:
             "trim2": _mean(sorted(ex)[:-2]) if len(ex) > 4 else None,
             "trim3": _mean(sorted(ex)[:-3]) if len(ex) > 5 else None,
         }
-    pr = [d["picks_real"] for d in per_day if d.get("picks_real") is not None]
-    mk = [d["mkt_real"] for d in per_day if d.get("mkt_real") is not None]
-    ph = [d["picks_hit"] for d in per_day if d.get("picks_hit") is not None]
-    mh = [d["mkt_hit"] for d in per_day if d.get("mkt_hit") is not None]
-    out["picks_real_mean"] = _mean(pr)
-    out["mkt_real_mean"] = _mean(mk)
-    out["picks_hit_mean"] = _mean(ph)
-    out["mkt_hit_mean"] = _mean(mh)
+    # 口径统一：入选均值/市场均值/胜率都只在"两者都有值"的那些天里算，
+    # 否则会出现"入选 -1.0%、市场 +0.0%，配对超额却是 +0.7%"这种看起来自相矛盾的表格
+    # （因为部分日期没有选出票，却仍有市场均值）。
+    both = [d for d in per_day
+            if d.get("picks_real") is not None and d.get("mkt_real") is not None]
+    out["picks_real_mean"] = _mean([d["picks_real"] for d in both])
+    out["mkt_real_mean"] = _mean([d["mkt_real"] for d in both])
+    out["picks_hit_mean"] = _mean([d["picks_hit"] for d in both if d.get("picks_hit") is not None])
+    out["mkt_hit_mean"] = _mean([d["mkt_hit"] for d in both if d.get("mkt_hit") is not None])
     out["n_picks"] = sum(d["n"] for d in per_day)
     return out
 
@@ -233,8 +234,8 @@ def _main_report(results: list[dict], day_list: list[str], hold: int, cost: floa
          f"- 持有期: {hold} 个交易日；成交假设: **{('T+1 开盘买入' if entry == 'open' else '当日收盘买入')}"
          f"**，扣双边成本 {cost*100:.2f}%",
          f"- 基准: **同日全市场等权平均**（非ST、价格≥2元）", "",
-         "| 场景 | 选股日 | 持仓 | 现实平均 | 市场平均 | **配对超额** | 超额胜率 | t 值 | t_adj | p 值 |",
-         "|---|---|---|---|---|---|---|---|---|---|"]
+         "| 场景 | 选股日 | 持仓 | 入选平均 | 市场平均 | **配对超额** | 入选胜率 | 市场胜率 | 超额胜率 | t 值 | t_adj | p 值 |",
+         "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         rr = r["real"]
         t_s = f"{rr['t']:.2f}" if rr["t"] is not None else "N/A"
@@ -242,6 +243,7 @@ def _main_report(results: list[dict], day_list: list[str], hold: int, cost: floa
         p_s = f"{rr['p']:.3f}" if rr["p"] is not None else "N/A"
         L.append(f"| {r['label']} | {rr['n_days']} | {r['n_picks']} | {_pct(r.get('picks_real_mean'))} "
                  f"| {_pct(r.get('mkt_real_mean'))} | **{_pct(rr['excess_mean'])}** "
+                 f"| {_pct0(r.get('picks_hit_mean'), 0)} | {_pct0(r.get('mkt_hit_mean'), 0)} "
                  f"| {_pct0(rr['win_rate'], 0)} | {t_s} | {ta_s} | {p_s} |")
     L += ["", "## 稳健性：剔除最好的几天之后还剩多少超额（现实口径）", "",
           "| 场景 | 全部 | 剔最好1天 | 剔最好2天 | 剔最好3天 |", "|---|---|---|---|---|"]
