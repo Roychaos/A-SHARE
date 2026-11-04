@@ -425,3 +425,9 @@
 2026-11-04 03:18:47,860 WARNING run_daily: 失败 601326: exceptions must derive from BaseException
 2026-11-04 03:18:47,860 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
 2026-11-04 03:18:47,860 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-04 23:47:03,331 INFO run_daily: == 每日流水线 2026-11-04 开始 ==
+2026-11-04 23:48:24,272 INFO run_daily: 2026-11-04 入选 20 只: ['1.301628', '2.688001', '3.002213', '4.600792', '5.002328', '6.000070', '7.603120', '8.603321', '9.002902', '10.300283', '11.603075', '12.002918', '13.605077', '14.603353', '15.002787', '16.002084', '17.300670', '18.688721', '19.301085', '20.603421']
+2026-11-04 23:48:25,593 INFO run_daily: == 完成: 更新 6 只 / 6 根, 失败 3, 入选 20 ==
+2026-11-04 23:48:25,593 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-04 23:48:25,593 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-04 23:48:25,593 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
