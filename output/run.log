@@ -463,3 +463,11 @@
 2026-11-07 00:15:23,554 INFO run_daily: 2026-11-07 非交易日，跳过。
 2026-11-07 00:58:20,765 INFO run_daily: == 每日流水线 2026-11-07 开始 ==
 2026-11-07 00:58:20,771 INFO run_daily: 2026-11-07 非交易日，跳过。
+2026-11-10 01:50:47,792 INFO run_daily: == 每日流水线 2026-11-10 开始 ==
+2026-11-10 04:41:26,709 INFO run_daily: 2026-11-10 入选 0 只: []
+2026-11-10 04:41:26,710 INFO run_daily: == 完成: 更新 5209 只 / 10412 根, 失败 5, 入选 0 ==
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
