@@ -287,20 +287,38 @@ def _limit_pct(code: str) -> float:
     return 0.195 if code.startswith(("300", "301", "688", "689")) else 0.095
 
 
-def _template_cutoff(conn, date: str, forward_days: int) -> str:
-    """模板锚点的最晚可用日期（防前视偏差）。
+def _template_bounds(conn, date: str, forward_days: int, window_days: int) -> tuple[str, str]:
+    """返回可用模板的锚点日期区间 (下界, 上界)。
 
-    一个锚点要被认定为"赢家"，需要它之后 forward_days 个交易日的涨幅已经发生。
-    若只用 `anchor_date < date`，那么在 date 当天其实还看不到最近 forward_days 天
-    那几个锚点的结果 —— 模板库就"提前知道"了未来，构成 look-ahead bias。
-    正确做法：锚点必须早于 date 往前数 forward_days 个交易日。
+    上界（防前视偏差）：锚点之后 forward_days 个交易日必须已经收盘，
+        否则"这个锚点是赢家"在 date 当天还不可知。
+    下界（防"旧版本的神"）：只保留 date 之前最近 window_days 个交易日内的锚点。
+        ★ 形态会随市场风格衰减，拿几年前的老形态选股 = 用旧版本的神；
+          回测时同样必须遵守，否则等于让模型偷看旧时代。
+        ★ window_days <= 0 表示不设下界（旧行为）。
     """
+    need = max(window_days, forward_days) + 2
     rows = conn.execute(
         "SELECT date FROM trade_cal WHERE date <= ? ORDER BY date DESC LIMIT ?",
-        (date, forward_days + 1)).fetchall()
-    if len(rows) >= forward_days + 1:
-        return rows[-1][0]
-    return (dt.date.fromisoformat(date) - dt.timedelta(days=int(forward_days * 1.5))).isoformat()
+        (date, need)).fetchall()
+    ds = [r[0] for r in rows]
+    if len(ds) >= forward_days + 1:
+        cutoff = ds[forward_days]
+    else:
+        cutoff = (dt.date.fromisoformat(date) - dt.timedelta(days=int(forward_days * 1.5))).isoformat()
+    if window_days <= 0:
+        return "", cutoff
+    if len(ds) >= window_days + 1:
+        floor = ds[window_days]
+    else:                                   # 日历不够长 → 用自然日粗估
+        floor = (dt.date.fromisoformat(cutoff)
+                 - dt.timedelta(days=int(window_days * 1.45))).isoformat()
+    return floor, cutoff
+
+
+def _template_cutoff(conn, date: str, forward_days: int) -> str:
+    """锚点最晚可用日期（仅上界；保留给旧调用方）。"""
+    return _template_bounds(conn, date, forward_days, 0)[1]
 
 
 def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> list[dict]:
@@ -313,11 +331,22 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
     from_iso = from_dt.isoformat()
 
     forward_days = int(cfg.get("learning", {}).get("forward_days", 10))
-    tpl_cutoff = _template_cutoff(conn, date, forward_days)
-    tpl_rows = conn.execute(
-        "SELECT id,code,anchor_date,fwd_ret_10d,w_close,w_vol FROM template WHERE anchor_date <= ?",
-        (tpl_cutoff,),
-    ).fetchall()
+    # tpl_window_days：模板库的滚动窗口（交易日）。<=0 表示不设下界。
+    # 默认取 lookback_days（250 ≈ 1 年），即"只用最近一年的赢家形态"。
+    tpl_window = int(cfg.get("learning", {}).get(
+        "tpl_window_days", cfg.get("learning", {}).get("lookback_days", 250)))
+    tpl_floor, tpl_cutoff = _template_bounds(conn, date, forward_days, tpl_window)
+    if tpl_floor:
+        tpl_rows = conn.execute(
+            "SELECT id,code,anchor_date,fwd_ret_10d,w_close,w_vol FROM template "
+            "WHERE anchor_date <= ? AND anchor_date >= ?",
+            (tpl_cutoff, tpl_floor),
+        ).fetchall()
+    else:
+        tpl_rows = conn.execute(
+            "SELECT id,code,anchor_date,fwd_ret_10d,w_close,w_vol FROM template "
+            "WHERE anchor_date <= ?", (tpl_cutoff,),
+        ).fetchall()
     tpl_cols = ("id", "code", "anchor_date", "fwd_ret_10d", "w_close", "w_vol")
     templates = [dict(zip(tpl_cols, r)) for r in tpl_rows]
 
@@ -421,7 +450,8 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
             "best_tpl_code": combined["best_code"], "best_tpl_anchor": combined["best_anchor"],
         })
 
-    logger.info("%s: 完成全市场打分 %d 只（模板可用到 %s）", date, len(scored_all), tpl_cutoff)
+    logger.info("%s: 完成全市场打分 %d 只（模板 %d 个，锚点区间 %s ~ %s）",
+                date, len(scored_all), len(tpl_rows), tpl_floor or "不限", tpl_cutoff)
     return scored_all
 
 

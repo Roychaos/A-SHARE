@@ -200,6 +200,49 @@ def _mean(xs: list[float]) -> float | None:
     return (sum(xs) / len(xs)) if xs else None
 
 
+def _segment_stats(per_day: list[dict], n_segments: int, overlap: int) -> list[dict]:
+    """把回放日按时间顺序切成 N 段分别统计 —— 检验"跨期一致性"。
+
+    整体 t 值意义有限（2 年也可能只靠某一段行情）；分段才能回答
+    "这是结构性效应，还是特定版本的产物"。
+    """
+    days = [d for d in per_day
+            if d.get("picks_real") is not None and d.get("mkt_real") is not None]
+    if not days or n_segments < 2:
+        return []
+    size = max(2, math.ceil(len(days) / n_segments))
+    out = []
+    for i in range(0, len(days), size):
+        seg = days[i:i + size]
+        ex = [d["picks_real"] - d["mkt_real"] for d in seg]
+        if len(ex) < 2:
+            continue
+        t, _p = _tstat(ex)
+        out.append({
+            "start": seg[0]["date"], "end": seg[-1]["date"], "n": len(ex),
+            "excess": _mean(ex),
+            "win": sum(1 for x in ex if x > 0) / len(ex),
+            "t_adj": (t / math.sqrt(overlap)) if (t is not None and overlap > 1) else t,
+        })
+    return out
+
+
+def _recent_stats(per_day: list[dict], days_back: int = 180) -> dict | None:
+    """最近 N 个自然日的表现（"当前版本"能期待的东西）。"""
+    days = [d for d in per_day
+            if d.get("picks_real") is not None and d.get("mkt_real") is not None]
+    if not days:
+        return None
+    last = dt.date.fromisoformat(days[-1]["date"])
+    cut = (last - dt.timedelta(days=days_back)).isoformat()
+    seg = [d for d in days if d["date"] >= cut]
+    if len(seg) < 2:
+        return None
+    ex = [d["picks_real"] - d["mkt_real"] for d in seg]
+    return {"n": len(ex), "excess": _mean(ex),
+            "win": sum(1 for x in ex if x > 0) / len(ex)}
+
+
 def _summarize(per_day: list[dict], label: str, overlap: int = 1) -> dict:
     """以"交易日"为观测单位做配对统计（非重叠采样后各观测才近似独立）。
 
@@ -247,7 +290,7 @@ def _pct0(x, digits=1):
 
 
 def _main_report(results: list[dict], day_list: list[str], hold: int, cost: float,
-                 entry: str, step: int) -> list[str]:
+                 entry: str, step: int, segments: int = 0) -> list[str]:
     L = ["# 样本外回放报告（同日配对基准）", "",
          f"- 回放区间: {day_list[0]} ~ {day_list[-1]}（{len(day_list)} 个选股日，抽样步长 {step}）",
          f"- 持有期: {hold} 个交易日；成交假设: **{('T+1 开盘买入' if entry == 'open' else '当日收盘买入')}"
@@ -278,6 +321,27 @@ def _main_report(results: list[dict], day_list: list[str], hold: int, cost: floa
         p_s = f"{ri['p']:.3f}" if ri["p"] is not None else "N/A"
         L.append(f"| {r['label']} | {_pct(ri['excess_mean'])} | {_pct0(ri['win_rate'], 0)} "
                  f"| {t_s} | {p_s} |")
+    # ★ 跨期一致性：分段统计 + 最近半年（回答"是不是特定版本的产物"）
+    if segments and segments >= 2:
+        L += ["", f"## 跨期一致性：切 {segments} 段分别看（现实口径）", ""]
+        for r in results:
+            segs = r.get("segments") or []
+            if not segs:
+                continue
+            pos = sum(1 for s in segs if (s.get("excess") or 0) > 0)
+            L += [f"### {r['label']}：{pos}/{len(segs)} 段超额为正", "",
+                  "| 区段 | 观测 | 配对超额 | 超额胜率 | t_adj |", "|---|---|---|---|---|"]
+            for s in segs:
+                ta = f"{s['t_adj']:.2f}" if s.get("t_adj") is not None else "N/A"
+                L.append(f"| {s['start']} ~ {s['end']} | {s['n']} | {_pct(s['excess'])} "
+                         f"| {_pct0(s['win'], 0)} | {ta} |")
+            rec = r.get("recent")
+            if rec:
+                L += ["", f"- 最近半年（{rec['n']} 个观测）：配对超额 {_pct(rec['excess'])}，"
+                          f"超额胜率 {_pct0(rec['win'], 0)}"]
+            L += [""]
+        L += ["> 判读：若只有 1~2 段为正，说明是特定行情的产物；≥70% 段为正才算结构性效应。", ""]
+
     # 逐日明细只输出 single 场景（sweep 时会有十几组，报告会太长）
     for r in results:
         if not str(r["label"]).startswith("single"):
@@ -305,6 +369,8 @@ def main() -> int:
     ap.add_argument("--cost", type=float, default=0.0015, help="双边成本（佣金+印花税+滑点，默认0.15%%）")
     ap.add_argument("--hold", type=int, default=None,
                     help="持有期（交易日）；默认取 learning.forward_days（周度策略建议 20）")
+    ap.add_argument("--segments", type=int, default=6,
+                    help="把回放日切成 N 段分别统计（跨期一致性；默认 6，0=关闭）")
     ap.add_argument("--widths", default="5,20,10%",
                     help="同时评估的组合宽度，逗号分隔；'5'=前5只，'10%%'=全截面前10%%（默认 5,20,10%%）")
     ap.add_argument("--entry", choices=["open", "close"], default="open",
@@ -357,6 +423,8 @@ def main() -> int:
             s = _summarize(replay[wd]["per_day"], f"{label}/Top{wd}", overlap)
             s["picks"] = replay[wd]["picks"]
             s["per_day"] = replay[wd]["per_day"]
+            s["segments"] = _segment_stats(replay[wd]["per_day"], args.segments, overlap)
+            s["recent"] = _recent_stats(replay[wd]["per_day"])
             results.append(s)
 
     out_dir = cfg_get(cfg, "paths.output", "output")
@@ -364,7 +432,8 @@ def main() -> int:
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     rp = os.path.join(out_dir, f"validate_{'sweep' if args.sweep else 'single'}_{stamp}.md")
     with open(rp, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(_main_report(results, day_list, hold, args.cost, args.entry, step)))
+        fh.write("\n".join(_main_report(results, day_list, hold, args.cost, args.entry,
+                                        step, args.segments)))
 
     print("\n=== 同日配对结果（现实口径：%s + 成本 %.2f%%）==="
           % ("T+1开盘" if args.entry == "open" else "当日收盘", args.cost * 100))
@@ -379,6 +448,13 @@ def main() -> int:
               f"{_pct(rr['excess_mean']):>10}{_pct0(rr['win_rate'], 0):>7}"
               f"{t_s:>7}{ta_s:>7}{p_s:>8}")
         print(f"{'  └ 剔除最好1/2/3天后的超额':<28}{_pct(rr['trim1'])} / {_pct(rr['trim2'])} / {_pct(rr['trim3'])}")
+        segs = r.get("segments") or []
+        if segs:
+            pos = sum(1 for s in segs if (s.get("excess") or 0) > 0)
+            rec = r.get("recent") or {}
+            print(f"{'  └ 分段':<28}{pos}/{len(segs)} 段为正"
+                  + (f"；最近半年 {_pct(rec.get('excess'))}（胜率 {_pct0(rec.get('win'), 0)}）"
+                     if rec else ""))
     print(f"\n完整报告已写入: {rp}")
     conn.close()
 

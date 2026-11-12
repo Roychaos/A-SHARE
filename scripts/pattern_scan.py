@@ -53,8 +53,8 @@ KNN_KS = [3, 5, 10]
 def load_templates(conn, window: int):
     rows = conn.execute(
         "SELECT id, code, anchor_date, fwd_ret_10d, w_close, w_vol FROM template").fetchall()
-    close, vol, fwd, ok = [], [], [], []
-    for _tid, _code, _anchor, f, wc, wv in rows:
+    close, vol, fwd, anchors = [], [], [], []
+    for _tid, _code, anchor, f, wc, wv in rows:
         try:
             c = [float(x) for x in json.loads(wc or "[]")]
             v = [float(x) for x in json.loads(wv or "[]")]
@@ -65,10 +65,62 @@ def load_templates(conn, window: int):
         close.append(c)
         vol.append(v if len(v) == window else [float("nan")] * window)
         fwd.append(float(f) if isinstance(f, (int, float)) else float("nan"))
-        ok.append(True)
+        anchors.append(anchor)
     return (np.asarray(close, dtype=np.float64) if close else np.zeros((0, window)),
             np.asarray(vol, dtype=np.float64) if vol else np.zeros((0, window)),
-            np.asarray(fwd, dtype=np.float64) if fwd else np.zeros(0))
+            np.asarray(fwd, dtype=np.float64) if fwd else np.zeros(0),
+            anchors)
+
+
+# 「形态会不会衰减」实验用的参考变体（旧生产口径 vs 新生产口径）
+REF_VARIANTS = [("z_vol30", "z", 0.3), ("rank_vol50", "rank", 0.5)]
+
+
+def _window_sweep(conn, cal, idx, sample, args, window, Tc, Tv, anchors):
+    """对每个模板滚动窗口算参考变体的 RankIC —— 直接检验"形态会不会衰减"。"""
+    windows = [int(x) for x in args.tpl_windows.split(",") if x.strip()]
+    series: dict[str, list[float]] = {}
+    used: dict[str, list[int]] = {}
+    for d in sample:
+        i = idx[d]
+        fwd = forward_returns(conn, cal[i + 1], cal[i + args.hold], args.cost)
+        if len(fwd) < 100:
+            continue
+        codes, Wz, Wv = stock_windows(conn, d, window)
+        if args.limit:
+            codes, Wz, Wv = codes[:args.limit], Wz[:args.limit], Wv[:args.limit]
+        rets = np.asarray([fwd.get(c, float("nan")) for c in codes], dtype=np.float64)
+        keep = ~np.isnan(rets)
+        if keep.sum() < 100:
+            continue
+        Wz, Wv, rets = Wz[keep], Wv[keep], rets[keep]
+        cutoff = cal[max(0, i - args.hold)]        # 锚点后 hold 交易日须已收盘（防前视）
+        for w in windows:
+            floor = cal[max(0, i - w)]
+            mask = np.asarray([a is not None and floor <= a <= cutoff for a in anchors], dtype=bool)
+            if mask.sum() < 20:
+                continue
+            Tc_m, Tv_m = Tc[mask], Tv[mask]
+            tvol_ok = ~np.isnan(Tv_m).any(axis=1)
+            diff = np.zeros((len(Wz), len(Tc_m)), dtype=np.float64)
+            for k in range(window):
+                diff += np.abs(Wv[:, k][:, None] - Tv_m[None, :, k])
+            vol_sim = np.clip(1.0 - diff / window / 2.0, 0.0, 1.0) * 100.0
+            vol_sim[:, ~tvol_ok] = 50.0
+            for label, metric, vw in REF_VARIANTS:
+                Wc = _metric_matrix(Wz, metric)
+                Tc_std = _std_rows(Tc_m)[0] if metric == "z" else _metric_matrix(Tc_m, metric)
+                corr = (Wc @ Tc_std.T) / Wc.shape[1]
+                price = (corr + 1.0) / 2.0 * 100.0
+                combo = (1.0 - vw) * price + vw * vol_sim
+                k3 = min(3, combo.shape[1])
+                top3 = np.partition(combo, -k3, axis=1)[:, -k3:].mean(axis=1)
+                ic = spearman(top3.tolist(), rets.tolist())
+                key = f"tpl{w}_{label}"
+                if ic is not None:
+                    series.setdefault(key, []).append(ic)
+                    used.setdefault(key, []).append(int(mask.sum()))
+    return series, used
 
 
 def stock_windows(conn, date: str, window: int, codes: list[str] | None = None):
@@ -182,6 +234,9 @@ def main() -> int:
     ap.add_argument("--hold", type=int, default=20)
     ap.add_argument("--cost", type=float, default=0.0015)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--tpl-windows", default="",
+                    help="模板滚动窗口扫描（交易日，逗号分隔，如 120,250,500）"
+                         "—— 只跑参考变体，用来检验'形态会不会衰减'；留空则跑 36 变体全扫描")
     ap.add_argument("--config", default=None)
     args = ap.parse_args()
 
@@ -190,12 +245,13 @@ def main() -> int:
     window = int(cfg_get(cfg, "learning.window", 25))
     conn = S.open_db(cfg_get(cfg, "paths.db", "data/screener.db"))
 
-    Tc, Tv, Tfwd = load_templates(conn, window)
+    Tc, Tv, Tfwd, anchors = load_templates(conn, window)
     if not len(Tc):
         print("模板库为空（或长度与 window 不匹配）")
         return 2
-    logger.info("模板 %d 个（赢家未来涨幅 中位 %.1f%%）",
-                len(Tc), float(np.nanmedian(Tfwd)) * 100)
+    logger.info("模板 %d 个（赢家未来涨幅 中位 %.1f%%），锚点 %s ~ %s",
+                len(Tc), float(np.nanmedian(Tfwd)) * 100,
+                min(a for a in anchors if a), max(a for a in anchors if a))
 
     cal = [r[0] for r in conn.execute("SELECT date FROM trade_cal ORDER BY date")]
     max_bar = conn.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
@@ -203,6 +259,60 @@ def main() -> int:
     usable = cal[: len(cal) - args.hold - 1]
     sample = usable[-args.days:][::-1][::args.step][::-1]
     idx = {d: i for i, d in enumerate(cal)}
+
+    # ---- 模式 B：模板滚动窗口扫描（检验形态衰减）----
+    if args.tpl_windows.strip():
+        series, used = _window_sweep(conn, cal, idx, sample, args, window, Tc, Tv, anchors)
+        if not series:
+            print("窗口扫描没有算出任何 IC")
+            return 3
+        overlap = max(1, int(round(args.hold / max(1, args.step))))
+        rows = []
+        for name, ics in series.items():
+            n = len(ics)
+            mean = sum(ics) / n
+            std = math.sqrt(sum((x - mean) ** 2 for x in ics) / (n - 1)) if n > 1 else 0.0
+            t, _p = _tstat(ics)
+            rows.append({"name": name, "n": n, "ic": mean,
+                         "ir": (mean / std) if std > 0 else None, "t": t,
+                         "t_adj": (t / math.sqrt(overlap)) if (t is not None and overlap > 1) else t,
+                         "pos": sum(1 for x in ics if x > 0) / n,
+                         "tpl_avg": (sum(used.get(name, [0])) / max(1, len(used.get(name, [1]))))})
+        rows.sort(key=lambda r: r["name"])
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = cfg_get(cfg, "paths.output", "output")
+        os.makedirs(out_dir, exist_ok=True)
+        rp = os.path.join(out_dir, f"tpl_window_scan_{stamp}.md")
+        L = ["# 模板滚动窗口扫描（形态会不会衰减）", "",
+             f"- 采样 {len(sample)} 个交易日（{sample[0]} ~ {sample[-1]}，每 {args.step} 日取 1）",
+             f"- 持有 {args.hold} 日；收益：次日开盘买 → 第 {args.hold} 日收盘卖，扣 {args.cost*100:.2f}%",
+             f"- 每个样本日只用「锚点在 [d−窗口, d−{args.hold}] 之间」的模板（滚动 + 防前视）", "",
+             "| 模板窗口 | 变体 | 样本 | 平均RankIC | IC_IR | t | t_adj | 正IC | 平均可用模板数 |",
+             "|---|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            L.append("| %s | %s | %d | %+.4f | %s | %s | %s | %.0f%% | %.0f |" % (
+                r["name"].split("_")[0].replace("tpl", ""), "_".join(r["name"].split("_")[1:]),
+                r["n"], r["ic"],
+                f"{r['ir']:+.3f}" if r["ir"] is not None else "N/A",
+                f"{r['t']:.2f}" if r["t"] is not None else "N/A",
+                f"{r['t_adj']:.2f}" if r["t_adj"] is not None else "N/A",
+                r["pos"] * 100, r["tpl_avg"]))
+        L += ["", "## 判读", "",
+              "- 若**短窗口（120）不劣于长窗口（500）** → 形态确实会衰减，应使用短窗口",
+              "- 若**长短窗口接近** → 形态是结构性的，不随版本变化",
+              "- 若**长窗口明显更好** → 只是模板样本量不足，需要更长历史", ""]
+        with open(rp, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(L))
+        print("\n=== 模板滚动窗口扫描 ===")
+        print(f"{'窗口_变体':<20}{'样本':>5}{'平均IC':>9}{'IC_IR':>8}{'t_adj':>7}{'正IC':>6}{'模板数':>7}")
+        for r in rows:
+            ir_s = f"{r['ir']:+.3f}" if r["ir"] is not None else "N/A"
+            ta_s = f"{r['t_adj']:.2f}" if r["t_adj"] is not None else "N/A"
+            print(f"{r['name']:<20}{r['n']:>5}{r['ic']:>+9.4f}{ir_s:>8}{ta_s:>7}"
+                  f"{r['pos']*100:>5.0f}%{r['tpl_avg']:>7.0f}")
+        print(f"\n完整报告已写入: {rp}")
+        conn.close()
+        return 0
 
     ic_series: dict[str, list[float]] = {}
     q_pairs: dict[str, list[tuple[float, float]]] = {}

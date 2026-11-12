@@ -160,6 +160,10 @@ jobs:
           echo "===== 3) 形态信号参数扫描（度量 × 量能权重 × 聚合方式）====="
           python scripts/pattern_scan.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
             2>&1 | tee "output/pattern_scan_$(date +%F).txt"
+          echo ""
+          echo "===== 4) 模板滚动窗口扫描（形态会不会衰减）====="
+          python scripts/pattern_scan.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
+            --tpl-windows "60,120,250,500" 2>&1 | tee "output/tpl_window_scan_$(date +%F).txt"
 
       - name: Run daily pipeline (fetch -> learn -> select -> cards, no push yet)
         if: steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
