@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 幂等守卫（当天报告已存在则本次跳过；repair/backtest 模式强制重跑）
+      - name: 幂等守卫（当天报告已存在 / 未收盘 → 本次跳过）
         id: gate
         env:
           TZ: Asia/Shanghai
@@ -45,9 +45,19 @@ jobs:
         run: |
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           today=$(date +%F)
+          hour=$(date +%H)
           if [ "$MODE" != "daily" ]; then
-            echo "$MODE 模式：忽略幂等守卫"
+            echo "$MODE 模式：忽略幂等守卫与收盘时间检查"
             echo "skip=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # ★ 关键守卫：GitHub 的 cron 常把 15:45 的槽位漂到次日 00:20~04:00。
+          #   那时当天还没有行情数据，整市场快照（hour>=15 才执行）会跳过，
+          #   于是一路走"逐股抓取" 5200 多只 → 耗时 3~7 小时、入选恒为 0，
+          #   还会占住并发组把当晚真正该跑的运行挤掉（2026-09~10 的实际事故）。
+          if [ "$hour" -lt 15 ]; then
+            echo "现在 ${hour} 点（未到 15:00 收盘），当天没有行情数据可算 —— 本次跳过，避免 3~7 小时的空跑"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -f "output/$today/summary.md" ]; then
@@ -187,41 +197,59 @@ jobs:
           fi
 
       # ★ 免费额度只有 5 条/天（且长正文会被服务端自动分条、每条都计数），
-      #   所以这里用「报告内容 md5」做闸门：内容没变就不再推第二次。
-      #   修复/重跑不会白白烧额度；内容真的更新了（比如补好了历史数据）才再推一条。
-      - name: Push report to WeChat (同一份内容只推一次，保护免费额度)
+      #   所以用「报告内容 md5」做闸门：内容没变就不再推第二次。
+      # ★ 另一个坑：不能用 `date +%F` 定位报告。运行跨午夜时（例如 21:06 启动、00:42 完成），
+      #   报告是按**启动日**命名的，用**完成日**去找必然找不到 → 静默跳过推送（2026-10-14 事故）。
+      #   改为：扫描最近几份报告，找"内容还没推送过"的最新一份。
+      - name: Push report to WeChat (取最新一份未推送的报告；内容不变不重推)
         if: always() && steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
         env:
           TZ: Asia/Shanghai
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
         run: |
-          today=$(date +%F)
-          md="output/$today/summary.md"
-          marker="output/$today/.pushed"
-          if [ ! -f "$md" ]; then
-            echo "$today 无选股结果（非交易日或选股为空），跳过推送"
+          set +e
+          target=""
+          today_epoch=$(date -d "$(date +%F)" +%s)
+          for md in $(ls -1d output/20*/summary.md 2>/dev/null | sort | tail -6); do
+            d=$(basename "$(dirname "$md")")
+            age=$(( (today_epoch - $(date -d "$d" +%s)) / 86400 ))
+            if [ "$age" -gt 3 ]; then
+              echo "$d 是 $age 天前的报告，不补推（避免把旧报告当成今天的推送）"
+              continue
+            fi
+            sig=$(md5sum "$md" | cut -d' ' -f1)
+            marker="$(dirname "$md")/.pushed"
+            if [ -f "$marker" ] && [ "$(cat "$marker")" = "$sig" ]; then
+              echo "$d 已推送过（md5=$sig），跳过"
+              continue
+            fi
+            echo "待推送：$d（md5=$sig，$age 天前）"
+            target=$d
+            break
+          done
+          if [ -z "$target" ]; then
+            echo "没有待推送的报告（都已推送，或今天没有选股结果）"
             exit 0
           fi
-          sig=$(md5sum "$md" | cut -d' ' -f1)
-          if [ -f "$marker" ] && [ "$(cat "$marker")" = "$sig" ]; then
-            echo "与已推送内容一致（md5=$sig），跳过推送以保护免费额度"
-            exit 0
+          if python scripts/emit_report.py --date "$target" --push-only; then
+            md5sum "output/$target/summary.md" | cut -d' ' -f1 > "output/$target/.pushed"
+            echo "已写入推送标记：output/$target/.pushed"
+          else
+            echo "推送失败（不写标记，下次运行会自动重试）"
           fi
-          python scripts/emit_report.py --date "$today" --push-only && echo "$sig" > "$marker"
 
       - name: 提交已推送标记（供后续运行判断）
         if: always() && steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
         continue-on-error: true
         run: |
-          today=$(date +%F)
-          [ -f "output/$today/.pushed" ] || exit 0
+          # 跨午夜时标记可能落在前一天的报告目录里 → 提交全部标记
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add -f "output/$today/.pushed"
+          git add -f output/20*/.pushed 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "无变化"
           else
-            git commit -m "pushed $today"
+            git commit -m "pushed markers $(date -u +%F)"
             git push origin main || echo "标记提交失败（不影响推送结果）"
           fi
 

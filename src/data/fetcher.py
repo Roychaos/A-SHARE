@@ -139,7 +139,13 @@ def fetch_history_safe(code: str, start_date: str, end_date: str,
             except Exception as exc:  # noqa: BLE001 逐源逐复权记录，全部失败后抛出
                 last_err = exc
                 logger.debug("%s: %s/%r 失败: %s", code, src, adj, exc)
-    raise last_err  # type: ignore[misc]
+    if last_err is None:
+        # 所有源都被跳过（sources 为空 / 源名都不认识）时，原来直接 raise None
+        # 只会得到 `TypeError: exceptions must derive from BaseException`，
+        # 把真正的配置问题掩盖掉（CI 日志里出现过 46 次）。
+        raise RuntimeError(
+            f"没有任何可用的行情源（sources={list(sources)!r}），请检查配置 fetch.sources")
+    raise last_err
 
 
 # ---------------- 整市场快照（每日增量快路径） ----------------
