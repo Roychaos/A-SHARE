@@ -367,3 +367,123 @@
 2026-10-30 14:29:38,274 INFO pattern_scan: 进度 40/50（36 个变体）
 2026-10-30 14:30:07,764 INFO pattern_scan: 进度 45/50（36 个变体）
 2026-10-30 14:30:37,889 INFO pattern_scan: 进度 50/50（36 个变体）
+2026-10-30 15:10:31,703 INFO validate: 交易日历含 45 个晚于行情的日期（2026-10-30 ~ 2026-12-31），已截断到 2026-10-29
+2026-10-30 15:10:31,705 INFO validate: 回放区间 2025-09-18 ~ 2026-09-23（50 个选股日，持有 20 日，宽度 5,20,10%）
+2026-10-30 15:11:05,571 INFO validate: 回放进度 20/50（宽度 5,20,10%）
+2026-10-30 15:11:23,369 INFO validate: 回放进度 25/50（宽度 5,20,10%）
+2026-10-30 15:11:44,494 INFO validate: 回放进度 30/50（宽度 5,20,10%）
+2026-10-30 15:12:06,669 INFO validate: 回放进度 35/50（宽度 5,20,10%）
+2026-10-30 15:12:29,768 INFO validate: 回放进度 40/50（宽度 5,20,10%）
+2026-10-30 15:12:53,431 INFO validate: 回放进度 45/50（宽度 5,20,10%）
+2026-10-30 15:13:17,316 INFO validate: 回放进度 50/50（宽度 5,20,10%）
+2026-10-30 15:13:17,459 INFO ic_test: 采样 50 个交易日（2025-09-17 ~ 2026-09-22），持有 20 日，成本 0.15%
+2026-10-30 15:13:55,802 INFO ic_test: 进度 20/50（本日 5155 只有未来收益）
+2026-10-30 15:14:26,504 INFO ic_test: 进度 25/50（本日 5158 只有未来收益）
+2026-10-30 15:15:03,141 INFO ic_test: 进度 30/50（本日 5141 只有未来收益）
+2026-10-30 15:15:41,708 INFO ic_test: 进度 35/50（本日 5181 只有未来收益）
+2026-10-30 15:16:22,579 INFO ic_test: 进度 40/50（本日 5192 只有未来收益）
+2026-10-30 15:17:03,791 INFO ic_test: 进度 45/50（本日 5188 只有未来收益）
+2026-10-30 15:17:45,693 INFO ic_test: 进度 50/50（本日 5552 只有未来收益）
+2026-10-30 15:17:46,067 INFO pattern_scan: 模板 2217 个（赢家未来涨幅 中位 18.1%）
+2026-10-30 15:17:48,585 INFO pattern_scan: 进度 5/50（0 个变体）
+2026-10-30 15:18:03,305 INFO pattern_scan: 进度 10/50（36 个变体）
+2026-10-30 15:18:27,313 INFO pattern_scan: 进度 15/50（36 个变体）
+2026-10-30 15:18:54,473 INFO pattern_scan: 进度 20/50（36 个变体）
+2026-10-30 15:19:24,630 INFO pattern_scan: 进度 25/50（36 个变体）
+2026-10-30 15:19:56,618 INFO pattern_scan: 进度 30/50（36 个变体）
+2026-10-30 15:20:29,459 INFO pattern_scan: 进度 35/50（36 个变体）
+2026-10-30 15:21:02,077 INFO pattern_scan: 进度 40/50（36 个变体）
+2026-10-30 15:21:34,833 INFO pattern_scan: 进度 45/50（36 个变体）
+2026-10-30 15:22:08,063 INFO pattern_scan: 进度 50/50（36 个变体）
+2026-10-30 22:32:16,810 INFO run_daily: == 每日流水线 2026-10-30 开始 ==
+2026-10-30 22:33:44,976 INFO run_daily: 2026-10-30 入选 20 只: ['1.601857', '2.601668', '3.300760', '4.601872', '5.601328', '6.601225', '7.601658', '8.000921', '9.603551', '10.601166', '11.600323', '12.000538', '13.600188', '14.002032', '15.600000', '16.000027', '17.000895', '18.002508', '19.600039', '20.600029']
+2026-10-30 22:33:46,652 INFO run_daily: == 完成: 更新 4 只 / 4 根, 失败 3, 入选 20 ==
+2026-10-30 22:33:46,653 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-10-30 22:33:46,653 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-10-30 22:33:46,653 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-10-31 00:17:22,390 INFO run_daily: == 每日流水线 2026-10-31 开始 ==
+2026-10-31 00:17:22,395 INFO run_daily: 2026-10-31 非交易日，跳过。
+2026-11-03 01:27:36,826 INFO run_daily: == 每日流水线 2026-11-03 开始 ==
+2026-11-03 04:15:12,150 INFO run_daily: 2026-11-03 入选 0 只: []
+2026-11-03 04:15:12,150 INFO run_daily: == 完成: 更新 5208 只 / 10410 根, 失败 6, 入选 0 ==
+2026-11-03 04:15:12,150 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-03 04:15:12,150 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-03 04:15:12,150 WARNING run_daily: 失败 601326: exceptions must derive from BaseException
+2026-11-03 04:15:12,150 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-03 04:15:12,150 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-03 23:28:57,162 INFO run_daily: == 每日流水线 2026-11-03 开始 ==
+2026-11-03 23:30:32,445 INFO run_daily: 2026-11-03 入选 20 只: ['1.000725', '2.000735', '3.000930', '4.000998', '5.002458', '6.600185', '7.688309', '8.601952', '9.605507', '10.000791', '11.002215', '12.600649', '13.601611', '14.600516', '15.600935', '16.000012', '17.600021', '18.601008', '19.000050', '20.688130']
+2026-11-03 23:30:33,751 INFO run_daily: == 完成: 更新 7 只 / 7 根, 失败 3, 入选 20 ==
+2026-11-03 23:30:33,752 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-03 23:30:33,752 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-03 23:30:33,752 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-04 00:31:02,897 INFO run_daily: == 每日流水线 2026-11-04 开始 ==
+2026-11-04 03:18:47,859 INFO run_daily: 2026-11-04 入选 0 只: []
+2026-11-04 03:18:47,860 INFO run_daily: == 完成: 更新 5208 只 / 5208 根, 失败 6, 入选 0 ==
+2026-11-04 03:18:47,860 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-04 03:18:47,860 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-04 03:18:47,860 WARNING run_daily: 失败 601326: exceptions must derive from BaseException
+2026-11-04 03:18:47,860 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-04 03:18:47,860 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-04 23:47:03,331 INFO run_daily: == 每日流水线 2026-11-04 开始 ==
+2026-11-04 23:48:24,272 INFO run_daily: 2026-11-04 入选 20 只: ['1.301628', '2.688001', '3.002213', '4.600792', '5.002328', '6.000070', '7.603120', '8.603321', '9.002902', '10.300283', '11.603075', '12.002918', '13.605077', '14.603353', '15.002787', '16.002084', '17.300670', '18.688721', '19.301085', '20.603421']
+2026-11-04 23:48:25,593 INFO run_daily: == 完成: 更新 6 只 / 6 根, 失败 3, 入选 20 ==
+2026-11-04 23:48:25,593 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-04 23:48:25,593 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-04 23:48:25,593 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-05 00:34:04,839 INFO run_daily: == 每日流水线 2026-11-05 开始 ==
+2026-11-05 03:28:20,572 INFO run_daily: 2026-11-05 入选 0 只: []
+2026-11-05 03:28:20,572 INFO run_daily: == 完成: 更新 5209 只 / 5209 根, 失败 5, 入选 0 ==
+2026-11-05 03:28:20,572 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-05 03:28:20,572 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-05 03:28:20,573 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-05 03:28:20,573 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-05 03:28:20,573 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-05 23:49:40,511 INFO run_daily: == 每日流水线 2026-11-05 开始 ==
+2026-11-05 23:51:13,372 INFO run_daily: 2026-11-05 入选 20 只: ['1.600792', '2.002084', '3.600857', '4.301085', '5.301355', '6.002068', '7.300865', '8.603075', '9.300151', '10.603978', '11.301008', '12.603321', '13.000735', '14.002377', '15.600375', '16.000153', '17.002631', '18.603580', '19.300422', '20.002909']
+2026-11-05 23:51:14,475 INFO run_daily: == 完成: 更新 7 只 / 7 根, 失败 3, 入选 20 ==
+2026-11-05 23:51:14,475 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-05 23:51:14,475 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-05 23:51:14,475 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-06 00:49:46,079 INFO run_daily: == 每日流水线 2026-11-06 开始 ==
+2026-11-06 03:45:15,522 INFO run_daily: 2026-11-06 入选 0 只: []
+2026-11-06 03:45:15,523 INFO run_daily: == 完成: 更新 5209 只 / 5209 根, 失败 5, 入选 0 ==
+2026-11-06 03:45:15,523 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-06 03:45:15,523 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-06 03:45:15,523 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-06 03:45:15,523 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-06 03:45:15,523 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-06 23:24:07,263 INFO run_daily: == 每日流水线 2026-11-06 开始 ==
+2026-11-06 23:25:18,324 INFO run_daily: 2026-11-06 入选 20 只: ['1.603120', '2.301366', '3.001268', '4.002631', '5.603052', '6.001326', '7.001228', '8.603588', '9.605589', '10.002489', '11.300489', '12.600935', '13.601789', '14.603650', '15.002012', '16.002375', '17.300865', '18.600301', '19.002787', '20.600463']
+2026-11-06 23:25:19,269 INFO run_daily: == 完成: 更新 6 只 / 6 根, 失败 3, 入选 20 ==
+2026-11-06 23:25:19,269 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-06 23:25:19,269 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-06 23:25:19,270 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-07 00:15:23,549 INFO run_daily: == 每日流水线 2026-11-07 开始 ==
+2026-11-07 00:15:23,554 INFO run_daily: 2026-11-07 非交易日，跳过。
+2026-11-07 00:58:20,765 INFO run_daily: == 每日流水线 2026-11-07 开始 ==
+2026-11-07 00:58:20,771 INFO run_daily: 2026-11-07 非交易日，跳过。
+2026-11-10 01:50:47,792 INFO run_daily: == 每日流水线 2026-11-10 开始 ==
+2026-11-10 04:41:26,709 INFO run_daily: 2026-11-10 入选 0 只: []
+2026-11-10 04:41:26,710 INFO run_daily: == 完成: 更新 5209 只 / 10412 根, 失败 5, 入选 0 ==
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-10 04:41:26,710 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-10 23:55:37,999 INFO run_daily: == 每日流水线 2026-11-10 开始 ==
+2026-11-11 02:36:54,287 INFO run_daily: 2026-11-10 入选 20 只: ['1.003001', '2.000797', '3.600770', '4.600227', '5.600857', '6.301355', '7.600638', '8.002584', '9.002377', '10.002942', '11.600604', '12.300422', '13.002106', '14.300427', '15.600159', '16.000663', '17.600657', '18.002562', '19.001366', '20.000565']
+2026-11-11 02:36:56,159 INFO run_daily: == 完成: 更新 5209 只 / 10411 根, 失败 5, 入选 20 ==
+2026-11-11 02:36:56,160 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-11 02:36:56,160 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-11 02:36:56,160 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-11 02:36:56,160 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-11 02:36:56,160 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
+2026-11-12 01:29:29,726 INFO run_daily: == 每日流水线 2026-11-12 开始 ==
+2026-11-12 04:07:51,435 INFO run_daily: 2026-11-12 入选 0 只: []
+2026-11-12 04:07:51,435 INFO run_daily: == 完成: 更新 5209 只 / 10412 根, 失败 5, 入选 0 ==
+2026-11-12 04:07:51,435 WARNING run_daily: 失败 601059: exceptions must derive from BaseException
+2026-11-12 04:07:51,436 WARNING run_daily: 失败 601198: exceptions must derive from BaseException
+2026-11-12 04:07:51,436 WARNING run_daily: 失败 688121: exceptions must derive from BaseException
+2026-11-12 04:07:51,436 WARNING run_daily: 失败 688496: exceptions must derive from BaseException
+2026-11-12 04:07:51,436 WARNING run_daily: 失败 689009: Length mismatch: Expected axis has 0 elements, new values have 2 elements
