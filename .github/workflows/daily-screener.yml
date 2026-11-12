@@ -164,6 +164,10 @@ jobs:
           echo "===== 4) 模板滚动窗口扫描（形态会不会衰减）====="
           python scripts/pattern_scan.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
             --tpl-windows "60,120,250,500" 2>&1 | tee "output/tpl_window_scan_$(date +%F).txt"
+          echo ""
+          echo "===== 5) 组合净值回测（周度选股 + 三档仓位择时）====="
+          python scripts/portfolio_backtest.py --days "$BT_DAYS" --step "$BT_STEP" --hold "$BT_HOLD" \
+            --topn 20 2>&1 | tee "output/portfolio_$(date +%F).txt"
 
       - name: Run daily pipeline (fetch -> learn -> select -> cards, no push yet)
         if: steps.gate.outputs.skip != '1' && steps.gate.outputs.mode != 'backtest'
