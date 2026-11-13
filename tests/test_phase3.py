@@ -54,7 +54,18 @@ def test_fallback_and_markdown():
     text = nar.fallback_text(conn, s)
     check("fallback contains tpl", "000858" in text and "21.0%" in text)
     md = pipeline.build_markdown("2026-09-03", [dict(s, narrative="测试文案")])
-    check("markdown builder", "600519" in md and "Top1" in md)
+    # 标题口径 2026-11-13 改为"建仓 N 只"（周度批次语义），断言随之更新
+    check("markdown builder", "600519" in md and "建仓 1 只" in md)
+    # 组合动作段落（周报形态：本周建仓 / 到期卖出）
+    md2 = pipeline.build_markdown("2026-09-03", [dict(s, narrative="测试文案")],
+                                  {"buys": [{"code": "600519", "name": "贵州茅台",
+                                             "score": 95.0, "due_date": "2026-10-08"}],
+                                   "sells": [{"code": "000858", "name": "", "batch_date": "2026-09-05",
+                                              "ret": 0.032}],
+                                   "open_n": 15})
+    check("报告含建仓段", "本周建仓" in md2 and "2026-10-08" in md2)
+    check("报告含到期卖出段", "本周到期卖出" in md2 and "+3.20%" in md2)
+    check("报告含当前持仓数", "当前持仓 15 只" in md2)
     conn.close()
 
 

@@ -72,6 +72,20 @@ CREATE TABLE IF NOT EXISTS run_log(
   ts TEXT
 );
 
+-- 组合持仓（周度批次，持有 hold 个交易日后到期卖出）
+CREATE TABLE IF NOT EXISTS position(
+  batch_date TEXT NOT NULL,
+  code TEXT NOT NULL,
+  buy_date TEXT,
+  due_date TEXT,
+  score REAL,
+  status TEXT DEFAULT 'open',
+  close_date TEXT,
+  ret REAL,
+  PRIMARY KEY(batch_date, code)
+);
+CREATE INDEX IF NOT EXISTS idx_pos_status ON position(status, due_date);
+
 CREATE TABLE IF NOT EXISTS fetch_log(
   code TEXT PRIMARY KEY,
   last_ok_date TEXT,
@@ -282,6 +296,44 @@ def set_fetch_log(conn, code: str, status: str, *, last_ok_date: str | None = No
         (code, last_ok_date, bars, status, error, _now()),
     )
     conn.commit()
+
+
+# ---------------- 组合持仓 ----------------
+
+def upsert_positions(conn, rows: Iterable[dict]) -> int:
+    n = 0
+    for r in rows:
+        conn.execute(
+            "INSERT OR REPLACE INTO position(batch_date, code, buy_date, due_date, score, status, ret) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (r["batch_date"], r["code"], r.get("buy_date"), r.get("due_date"),
+             r.get("score"), r.get("status", "open"), r.get("ret")))
+        n += 1
+    conn.commit()
+    return n
+
+
+def due_positions(conn, day: str) -> list[dict]:
+    sql = ("SELECT batch_date, code, buy_date, due_date, score FROM position "
+           "WHERE status='open' AND due_date IS NOT NULL AND due_date <= ? ORDER BY due_date, code")
+    return _rows_as_dicts(conn, sql, (day,))
+
+
+def open_position_count(conn) -> int:
+    row = conn.execute("SELECT COUNT(*) FROM position WHERE status='open'").fetchone()
+    return int(row[0] if row else 0)
+
+
+def close_positions(conn, batch_date: str, codes: Sequence[str], close_date: str,
+                    rets: dict[str, float]) -> int:
+    n = 0
+    for c in codes:
+        conn.execute(
+            "UPDATE position SET status='closed', close_date=?, ret=? "
+            "WHERE batch_date=? AND code=?", (close_date, rets.get(c), batch_date, c))
+        n += 1
+    conn.commit()
+    return n
 
 
 def add_run_log(conn, day: str, status: str, msg: str) -> None:

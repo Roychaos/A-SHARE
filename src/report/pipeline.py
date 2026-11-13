@@ -36,9 +36,29 @@ def _load_selected(conn, date: str) -> list[dict]:
     return out
 
 
-def build_markdown(date: str, selected: list[dict]) -> str:
+def build_markdown(date: str, selected: list[dict], actions: dict | None = None) -> str:
+    """actions: {buys: [...], sells: [...], open_n: int} —— 组合动作（周报形态）。"""
     disc = "仅供研究参考，不构成任何投资建议。"
-    lines = [f"# A股量价选股 · {date}  Top{len(selected)}", ""]
+    lines = [f"# A股量价选股 · {date}  建仓 {len(selected)} 只", ""]
+    if actions:
+        buys = actions.get("buys") or []
+        sells = actions.get("sells") or []
+        if buys:
+            lines.append(f"## 本周建仓（{len(buys)} 只，持有 20 个交易日）")
+            for b in buys:
+                lines.append(f"- {b['code']} {b.get('name','')} 分数 {b.get('score')} "
+                             f"到期 {b.get('due_date','-')}")
+            lines.append("")
+        if sells:
+            lines.append(f"## 本周到期卖出（{len(sells)} 只）")
+            for x in sells:
+                r = x.get("ret")
+                lines.append(f"- {x['code']} {x.get('name','')} "
+                             f"持有 {x.get('batch_date','-')} 起，收益 {('%+.2f%%' % (r*100)) if r is not None else 'N/A'}")
+            lines.append("")
+        if actions.get("open_n") is not None:
+            lines.append(f"> 当前持仓 {actions['open_n']} 只（每周建仓 1 批 × 持有 4 周）")
+            lines.append("")
     for s in selected:
         tpl = f"{s['best_tpl_code']}@{s['best_tpl_anchor']}" if s.get("best_tpl_code") else "—"
         lines.append(f"## #{s['rank']} {s['code']} {s['name']}")
@@ -49,7 +69,8 @@ def build_markdown(date: str, selected: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def emit(conn, cfg: dict, date: str, *, push: bool = True, image_count: int | None = None) -> dict:
+def emit(conn, cfg: dict, date: str, *, push: bool = True, image_count: int | None = None,
+         actions: dict | None = None) -> dict:
     """生成并推送某日选股报告。返回 {selected, cards, md, md_path}。"""
     selected = _load_selected(conn, date)
     if not selected:
@@ -74,7 +95,7 @@ def emit(conn, cfg: dict, date: str, *, push: bool = True, image_count: int | No
         except Exception:  # noqa: BLE001 图形失败不阻断推送其余；记完整堆栈便于排查
             logger.exception("%s 图文生成失败", s["code"])
 
-    md = build_markdown(date, selected)
+    md = build_markdown(date, selected, actions)
     md_path = os.path.join(out_dir, "summary.md")
     with open(md_path, "w", encoding="utf-8") as fh:
         fh.write(md)

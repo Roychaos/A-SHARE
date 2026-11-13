@@ -303,8 +303,21 @@ def select_top(scored: list[dict], cfg: dict) -> list[dict]:
     cand = [s for s in scored if _val(s) is not None]
     cand.sort(key=lambda s: (-_val(s), -(s.get("sig_score") or 0)))
 
-    pct = scoring.get("min_percentile")
-    if pct:
+    # ★ 分档带（band）：只在"分数分位 [low, high)" 之间选，**刻意跳过最顶尖的一小撮**。
+    #   依据（2026-11-13，137 个交易日全样本分档收益，超额/20日）：
+    #     top 0.5% +0.57% | 0.5~1% +0.59% | 1~2% +0.45%
+    #     | **2~5% +2.23%（最优）** | 5~10% +1.06% | 10~20% +0.89%
+    #     | 20~50% +0.53% | 后50% −0.76%
+    #   即"驼峰形"：最像赢家的那一小撮反而没有超额（形态末端已经涨过 = 追高）。
+    band = scoring.get("band") or {}
+    lo, hi = band.get("low"), band.get("high")
+    if lo is not None and hi is not None and cand:
+        n = len(cand)
+        i_lo = max(0, int(round(float(lo) * n)))
+        i_hi = min(n, max(i_lo + 1, int(round(float(hi) * n))))
+        cand = cand[i_lo:i_hi]
+    elif scoring.get("min_percentile"):
+        pct = scoring.get("min_percentile")
         try:
             p = float(pct)
         except (TypeError, ValueError):

@@ -6,10 +6,10 @@ name: daily-screener
 
 on:
   schedule:
-    # GitHub 的 schedule 经常延迟甚至整点丢单，所以给三个时段，谁先跑成算谁的（有幂等守卫，不会重复推送）
-    - cron: '45 7 * * 1-5'      # 北京 15:45（主）
-    - cron: '40 8 * * 1-5'      # 北京 16:40（兜底1）
-    - cron: '50 9 * * 1-5'      # 北京 17:50（兜底2）
+    # ★ 周度策略（持有 20 个交易日 ≈ 4 周）：只在每周五收盘后选一次、建一批。
+    #   周五为主动，周六为兜底重试（周六数据仍是最新收盘，产物相同；有幂等守卫不会重复推）。
+    - cron: '45 7 * * 5'      # 北京 周五 15:45
+    - cron: '15 1 * * 6'      # 北京 周六 09:15（重试）
   workflow_dispatch:
     inputs:
       mode:
@@ -55,18 +55,29 @@ jobs:
           #   那时当天还没有行情数据，整市场快照（hour>=15 才执行）会跳过，
           #   于是一路走"逐股抓取" 5200 多只 → 耗时 3~7 小时、入选恒为 0，
           #   还会占住并发组把当晚真正该跑的运行挤掉（2026-09~10 的实际事故）。
-          if [ "$hour" -lt 15 ]; then
-            echo "现在 ${hour} 点（未到 15:00 收盘），当天没有行情数据可算 —— 本次跳过，避免 3~7 小时的空跑"
+          dow=$(date +%u)     # 1=周一 … 6=周六 7=周日
+          if [ "$dow" -le 5 ] && [ "$hour" -lt 15 ]; then
+            echo "工作日 ${hour} 点（未到 15:00 收盘），当天没有行情数据可算 —— 跳过，避免空跑"
             echo "skip=1" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -f "output/$today/summary.md" ]; then
-            echo "已存在 output/$today/summary.md —— 今天已经跑过并推过了，本次跳过"
+            echo "已存在 output/$today/summary.md —— 本次跳过"
             echo "skip=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "今天（$today）还没有报告，本次正常执行"
-            echo "skip=0" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # ★ 周度策略的幂等：本周（近 5 个自然日）已有报告 → 说明周五那批已经建好，不再重复
+          latest=$(ls -1d output/20*/ 2>/dev/null | sort | tail -1 | xargs -r basename)
+          if [ -n "$latest" ]; then
+            age=$(( ( $(date +%s) - $(date -d "$latest" +%s) ) / 86400 ))
+            if [ "$age" -le 5 ]; then
+              echo "本周已有报告（$latest，${age} 天前）—— 本次跳过，避免重复建仓"
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "本周还没有报告，正常执行"
+          echo "skip=0" >> "$GITHUB_OUTPUT"
 
       # ★ 历史教训（2026-09-17 查明）：以前这里用 actions/download-artifact@v4 + path: .
       #   v4 默认只能看「本次运行」的产物 → 这一步从上线起一直失败 → 每次都退回 seed.zip（数据只到 09-03）

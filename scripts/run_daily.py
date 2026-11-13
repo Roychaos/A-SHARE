@@ -82,24 +82,37 @@ def main() -> int:
 
     # ③ 选股打分并落库
     selected: list = []
+    actions = None
+    hold = int(cfg_get(cfg, "portfolio.hold_days", cfg.get("learning", {}).get("forward_days", 20)))
     if S.count_templates(conn) == 0:
         logger.warning("模板库为空（历史数据不足），本次跳过选股")
     else:
         try:
+            from src.portfolio import tracker
             from src.screen.scorer import compute_and_select
 
+            # ① 先结算到期的旧批次（持有期满 20 个交易日 → 卖出）
+            sold = tracker.settle_due(conn, day)
+            # ② 再从"分数 2%~10% 带 + 入场确认"里选出本周建仓的票
             selected = compute_and_select(conn, cfg, day, limit=args.limit)
             logger.info("%s 入选 %d 只: %s", day, len(selected),
                         [f"{s['rank']}.{s['code']}" for s in selected])
+            # ③ 记录新批次（T+1 开盘买入，持有 hold 个交易日）
+            batch = tracker.record_batch(conn, day, selected, hold)
+            buys = tracker.enrich_names(conn, [
+                {"code": s["code"], "score": s.get("score"), "due_date": batch.get("due_date")}
+                for s in selected])
+            actions = {"buys": buys, "sells": tracker.enrich_names(conn, sold),
+                       "open_n": S.open_position_count(conn)}
         except Exception as exc:  # noqa: BLE001 选股失败不应中断已落库的行情更新
-            logger.error("选股失败: %s", exc)
+            logger.error("选股/持仓失败: %s", exc)
 
     # ④ 图文报告 + 推送（Phase 3）
     if selected:
         try:
             from src.report.pipeline import emit
 
-            emit(conn, cfg, day, push=not args.no_push)
+            emit(conn, cfg, day, push=not args.no_push, actions=actions)
         except Exception as exc:  # noqa: BLE001
             logger.error("图文/推送失败: %s", exc)
             try:
