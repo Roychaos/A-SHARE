@@ -376,11 +376,17 @@ def main() -> int:
     ap.add_argument("--entry", choices=["open", "close"], default="open",
                     help="成交口径：open=T+1开盘买入（现实，默认）；close=当日收盘买入（理想）")
     ap.add_argument("--config", default=None, help="配置文件路径")
+    ap.add_argument("--entry-confirm", choices=["cfg", "on", "off"], default="cfg",
+                    help="入场确认的开关覆盖：cfg=按配置；on/off=强制")
     ap.add_argument("--weights", default=None, help="单场景权重覆盖 'pattern_sim=1,signal=0,trend=0'")
     ap.add_argument("--sweep", action="store_true", help="一键对比 4 组权重")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    if args.entry_confirm != "cfg":
+        ec = dict((cfg.get("scoring") or {}).get("entry_confirm") or {})
+        ec["enable"] = (args.entry_confirm == "on")
+        cfg.setdefault("scoring", {})["entry_confirm"] = ec
     db = cfg_get(cfg, "paths.db", "data/screener.db")
     setup_logger("validate", cfg_get(cfg, "paths.log"))
     hold = args.hold if args.hold else int(cfg_get(cfg, "learning.forward_days", 10))

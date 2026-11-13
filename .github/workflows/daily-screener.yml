@@ -120,11 +120,27 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install CJK fonts & dependencies
+      # ★ pip 是关键依赖（失败必须停）；字体只是画图用的，绝不能因为它让整天报告消失。
+      #   2026-11-13 事故：`Install CJK fonts & dependencies` 里 apt-get 失败（exit 100），
+      #   整个 run 直接终止，当天的选股/推送全部被跳过 —— 这也是"某天没收到推送"的原因之一。
+      - name: Install dependencies (关键)
+        run: pip install --retries 5 --timeout 60 -r requirements.txt
+
+      - name: Install CJK fonts (非关键：失败也能跑，只是图表中文可能显示方块)
+        continue-on-error: true
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
-          pip install -r requirements.txt
+          sudo apt-get update -o Acquire::Retries=3 || echo "apt-get update 失败，继续"
+          sudo apt-get install -y fonts-noto-cjk || echo "apt 安装字体失败，改用直接下载"
+          if ! fc-list 2>/dev/null | grep -qi noto; then
+            echo "系统里没有 Noto 字体，尝试直接下载到 ~/.fonts ..."
+            mkdir -p ~/.fonts
+            curl -sSL --retry 3 -o ~/.fonts/NotoSansCJKsc-Regular.otf \
+              "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf" \
+              && echo "已下载 NotoSansCJKsc-Regular.otf ($(du -h ~/.fonts/*.otf | cut -f1))" \
+              || echo "字体下载也失败 —— 图表中文会是方块，但不影响选股与推送"
+            fc-cache -f >/dev/null 2>&1 || true
+          fi
+          fc-list 2>/dev/null | grep -i noto | head -3 || true
 
       - name: Prepare config
         run: cp config.example.yaml config.yaml

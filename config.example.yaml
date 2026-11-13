@@ -51,6 +51,17 @@ scoring:
   top_n: 20                   # ★ 5 → 20：IC 已显著（IC_IR≈1.07），但 5 只票的噪声使组合绩效无法被验证；
                               #   20 只把单期超额标准差从约 5.5% 降到约 3%，才有统计功效。
   max_per_industry: 2
+  # ★ 入场确认（硬性条件）：把"纯左侧"变成"左侧偏右"。
+  #   形态相似度只说明"图形像过去的赢家"（纯左侧，可能买在"跌不下去但也不动"的位置），
+  #   再加"已经在动"的确认，可降低假启动。全部基于当日收盘数据，不含未来信息。
+  entry_confirm:
+    enable: true
+    mode: all                 # all=全部满足（严格，默认）；any=任一满足（宽松）
+    vol_ratio_min: 1.2        # 当日成交量 / 20日均量 ≥ 阈值（放量确认）
+    above_ma5: true           # 收盘价站上 5 日均线（短期转强确认）
+    break_high20: false       # 收盘突破前 20 日最高价（更严格，默认关）
+    no_gap_fill: false        # 当日最低价 > 前一日收盘（跳空未回补）
+    ma5_above_ma10: false     # 5 日均线在 10 日均线上方
   # ★ 唯一真正有过滤效果的闸门：日级闸门（"今天到底该不该出手"）
   #   所有股票级门槛都不改变 Top5（见 tests/test_score_gate.py 的断言），
   #   只有"当日最高分低于历史水平就不选股"才真的会改变输出。
@@ -91,7 +102,8 @@ report:
   fonts:
     windows: ["C:/Windows/Fonts/msyh.ttc"]
     linux: ["/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"]
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/home/runner/.fonts/NotoSansCJKsc-Regular.otf"]   # CI apt 失败时的下载兜底
 
 # ---- 推送（推自己: Server酱；群推: 企业微信群机器人） ----
 push:

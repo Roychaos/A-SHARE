@@ -234,6 +234,54 @@ def _day_gate_ok(conn, cfg: dict, date: str, scored: list[dict]) -> tuple[bool, 
     return True, f"当日最高分 {best:.2f} >= 参照 {thr:.2f}"
 
 
+def _entry_confirm(ctx: dict, cfg: dict) -> tuple[bool, list[str]]:
+    """入场确认：把"纯左侧"变成"左侧偏右"的硬性条件。
+
+    为什么需要：形态相似度只回答"它在图形上像像过去的赢家" —— 那是纯左侧，
+    可能买在"跌不下去但也不动"的位置。加上"已经在动"的确认，可以降低假启动。
+
+    可组合的确认条件（全部基于**当日收盘**数据，不含未来信息）：
+        vol_ratio_min   当日成交量 / 20日均量 ≥ 阈值（放量）
+        above_ma5       收盘价站上 5 日均线
+        break_high20    收盘价突破前 20 个交易日的最高价
+        no_gap_fill     当日最低价 > 前一日收盘（跳空缺口未回补）
+        ma5_above_ma10  5 日均线在 10 日均线上方
+
+    mode = "all"（全部满足，更严格）/ "any"（任一满足，更宽松）。
+    返回 (是否通过, 未满足的条件名列表)。
+    """
+    ec = (cfg.get("scoring") or {}).get("entry_confirm") or {}
+    if not ec.get("enable", False):
+        return True, []
+    i = ctx["i"]
+    close = ctx["close"][i]
+    checks: list[tuple[str, bool]] = []
+
+    if ec.get("vol_ratio_min") is not None:
+        v = ctx["volume"][i]
+        vma = ctx["vma20"][i]
+        checks.append(("vol_ratio", bool(vma and v / vma >= float(ec["vol_ratio_min"]))))
+    if ec.get("above_ma5", False):
+        checks.append(("above_ma5", bool(ctx["ma5"][i] and close > ctx["ma5"][i])))
+    if ec.get("break_high20", False):
+        prev = ctx["high"][max(0, i - 20):i]
+        hi = max(prev) if prev else None
+        checks.append(("break_high20", bool(hi and close > hi)))
+    if ec.get("no_gap_fill", False):
+        prev_close = ctx["close"][i - 1] if i > 0 else None
+        checks.append(("no_gap_fill", bool(prev_close and ctx["low"][i] > prev_close)))
+    if ec.get("ma5_above_ma10", False):
+        checks.append(("ma5_above_ma10",
+                       bool(ctx["ma5"][i] and ctx["ma10"][i] and ctx["ma5"][i] > ctx["ma10"][i])))
+
+    if not checks:
+        return True, []
+    failed = [name for name, ok in checks if not ok]
+    if ec.get("mode", "all") == "any":
+        return len(failed) < len(checks), failed
+    return not failed, failed
+
+
 def select_top(scored: list[dict], cfg: dict) -> list[dict]:
     """按分数选出 Top N，支持两种门槛（可同时生效）：
 
@@ -321,10 +369,14 @@ def _template_cutoff(conn, date: str, forward_days: int) -> str:
     return _template_bounds(conn, date, forward_days, 0)[1]
 
 
-def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> list[dict]:
+def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None,
+                   apply_confirm: bool = True) -> list[dict]:
     """给**全市场**打分（不做 Top N 截断），用于回测 / IC 检验 / 选股内部复用。
 
-    返回 [{date, code, industry, score, sim_score, sig_score, trend_score, factors, ...}]。
+    apply_confirm=False 时不丢弃"未通过入场确认"的票（但会标记 confirm_ok），
+    供研究脚本做"有确认 vs 无确认"的同口径对比（打分只算一次，省数倍时间）。
+
+    返回 [{date, code, industry, score, sim_score, confirm_ok, factors, ...}]。
     """
     w = int(cfg.get("learning", {}).get("window", 25))
     from_dt = dt.date.fromisoformat(date) - dt.timedelta(days=int((w + 120) * 1.45) + 30)
@@ -383,7 +435,9 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
     # ★ 两遍式：第一遍过过滤条件并收集形态窗口，第二遍用 numpy 批量算相似度。
     #   逐只调用 template_sim 时全市场约 1000 万次 Pearson（纯 Python ≈1 分钟/交易日），
     #   批量矩阵乘后只需几秒 —— 这是能跑长样本回测（250+ 交易日）的前提。
-    pend: list[tuple[str, list[dict], dict, str | None]] = []
+    pend: list[tuple[str, list[dict], dict, str | None, bool]] = []
+    n_confirm_total = 0
+    n_confirm_fail = 0
     codes = sorted(groups)
     if limit:
         codes = codes[:limit]
@@ -416,17 +470,25 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
         if reasons:
             continue
 
-        pend.append((code, rows, ctx, ind))
+        # ★ 入场确认（硬性条件）：把"纯左侧"变成"左侧偏右"
+        confirm_ok, failed = _entry_confirm(ctx, cfg)
+        n_confirm_total += 1
+        if not confirm_ok:
+            n_confirm_fail += 1
+            if apply_confirm:
+                continue
+
+        pend.append((code, rows, ctx, ind, confirm_ok))
 
     sims = template_sim_batch(
-        [_zscore([r["close"] for r in rows[-w:]]) for _, rows, _, _ in pend],
-        [_vol_window(rows, w) for _, rows, _, _ in pend],
+        [_zscore([r["close"] for r in rows[-w:]]) for _, rows, _, _, _ in pend],
+        [_vol_window(rows, w) for _, rows, _, _, _ in pend],
         templates, top_matches=top_matches, w_price=w_price, w_vol=w_vol,
         metric=sim_metric,
     )
 
     scored_all: list[dict] = []
-    for (code, rows, ctx, ind), sim in zip(pend, sims):
+    for (code, rows, ctx, ind, confirm_ok), sim in zip(pend, sims):
         if factors_on:
             f7_data = _sector_data(code, ind, ind_data) if ind else None
             comp = F.composite_score(ctx, cfg, f7_data, available)
@@ -445,13 +507,14 @@ def score_universe(conn, cfg: dict, date: str, *, limit: int | None = None) -> l
             "industry": ind,
             "score": combined["total"], "sim_score": combined["sim"],
             "sig_score": combined["signal_max"], "trend_score": combined["trend"],
-            "hits": combined["hits"], "factors": factor_scores,
+            "hits": combined["hits"], "factors": factor_scores, "confirm_ok": confirm_ok,
             "matched_tpl_id": combined["best_tpl_id"],
             "best_tpl_code": combined["best_code"], "best_tpl_anchor": combined["best_anchor"],
         })
 
-    logger.info("%s: 完成全市场打分 %d 只（模板 %d 个，锚点区间 %s ~ %s）",
-                date, len(scored_all), len(tpl_rows), tpl_floor or "不限", tpl_cutoff)
+    logger.info("%s: 完成全市场打分 %d 只（模板 %d 个，锚点 %s~%s；入场确认通过 %d/%d）",
+                date, len(scored_all), len(tpl_rows), tpl_floor or "不限", tpl_cutoff,
+                n_confirm_total - n_confirm_fail, n_confirm_total)
     return scored_all
 
 
