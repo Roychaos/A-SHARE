@@ -20,3 +20,7 @@ output/
 # ç³»ç»Ÿæ–‡ä»¶
 .DS_Store
 Thumbs.db
+
+# ÁÙÊ±·ÖÎöÊä³ö
+_*.txt
+_*.json
